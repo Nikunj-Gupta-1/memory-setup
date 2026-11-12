@@ -1,0 +1,1083 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Offline Media Archive & Museum Viewer</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    :root {
+      --bg: #0f1117;
+      --card-bg: #1a1d26;
+      --border: #2a2e3d;
+      --text: #e2e8f0;
+      --text-muted: #94a3b8;
+      --accent: #3b82f6;
+      --accent-hover: #2563eb;
+      --danger: #ef4444;
+      --danger-hover: #dc2626;
+      --warning: #f59e0b;
+      --success: #10b981;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      overflow: hidden;
+    }
+    /* Top Header */
+    header {
+      background: var(--card-bg);
+      border-bottom: 1px solid var(--border);
+      padding: 12px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-shrink: 0;
+    }
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-weight: 700;
+      font-size: 1.15rem;
+      letter-spacing: -0.02em;
+    }
+    .badge {
+      background: rgba(59, 130, 246, 0.15);
+      color: #60a5fa;
+      padding: 4px 10px;
+      border-radius: 9999px;
+      font-size: 0.8rem;
+      font-weight: 600;
+    }
+    /* Metrics Pills */
+    .metrics {
+      display: flex;
+      gap: 16px;
+      font-size: 0.85rem;
+    }
+    .metric-pill {
+      background: rgba(255,255,255,0.05);
+      border: 1px solid var(--border);
+      padding: 6px 14px;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .metric-pill strong { color: #fff; }
+    /* Main Tabs Bar */
+    nav.tabs {
+      background: #141720;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      padding: 0 24px;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+    .tab-btn {
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      padding: 12px 18px;
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      transition: all 0.15s ease;
+    }
+    .tab-btn:hover { color: var(--text); }
+    .tab-btn.active {
+      color: var(--accent);
+      border-bottom-color: var(--accent);
+    }
+    /* Main Content Panes */
+    main {
+      flex: 1;
+      overflow: hidden;
+      position: relative;
+    }
+    .tab-pane {
+      display: none;
+      height: 100%;
+      width: 100%;
+      overflow-y: auto;
+    }
+    .tab-pane.active { display: flex; flex-direction: column; }
+    
+    /* Search Bar in Gallery */
+    .search-bar {
+      padding: 16px 24px;
+      background: var(--bg);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      gap: 16px;
+      align-items: center;
+      flex-shrink: 0;
+    }
+    .search-input {
+      flex: 1;
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 16px;
+      color: var(--text);
+      font-size: 0.95rem;
+      outline: none;
+    }
+    .search-input:focus { border-color: var(--accent); }
+    .filter-tag {
+      background: rgba(59, 130, 246, 0.2);
+      color: #60a5fa;
+      border: 1px solid rgba(59, 130, 246, 0.4);
+      padding: 6px 12px;
+      border-radius: 6px;
+      font-size: 0.85rem;
+      display: none;
+      align-items: center;
+      gap: 8px;
+    }
+    .filter-tag .clear { cursor: pointer; font-weight: bold; }
+    
+    /* Photo Grid */
+    .photo-grid-container {
+      flex: 1;
+      overflow-y: auto;
+      padding: 24px;
+    }
+    .photo-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 16px;
+    }
+    .photo-card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+      cursor: pointer;
+      transition: transform 0.15s ease, border-color 0.15s ease;
+      display: flex;
+      flex-direction: column;
+    }
+    .photo-card:hover {
+      transform: translateY(-2px);
+      border-color: var(--accent);
+    }
+    .card-thumb {
+      width: 100%;
+      height: 180px;
+      object-fit: cover;
+      background: #1e2230;
+      display: block;
+    }
+    .card-info {
+      padding: 10px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .card-title {
+      font-size: 0.85rem;
+      font-weight: 600;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .card-meta {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      display: flex;
+      justify-content: space-between;
+    }
+    
+    /* Map Container */
+    #map {
+      width: 100%;
+      height: 100%;
+      background: #0f1117;
+    }
+    
+    /* People Tab */
+    .people-container {
+      padding: 24px;
+      overflow-y: auto;
+    }
+    .people-action-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 20px;
+    }
+    .section-title {
+      font-size: 1.15rem;
+      font-weight: 700;
+      margin-bottom: 16px;
+      color: #f1f5f9;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .people-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+      gap: 16px;
+      margin-bottom: 32px;
+    }
+    .person-card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    .person-card:hover {
+      border-color: var(--accent);
+      transform: translateY(-2px);
+    }
+    .person-card.active-filter {
+      border-color: #3b82f6;
+      background: rgba(59, 130, 246, 0.12);
+    }
+    .person-avatar {
+      width: 96px;
+      height: 96px;
+      border-radius: 50%;
+      object-fit: cover;
+      margin-bottom: 12px;
+      border: 3px solid rgba(255,255,255,0.1);
+      background: #252a3a;
+    }
+    .person-name {
+      font-weight: 600;
+      font-size: 0.95rem;
+      margin-bottom: 4px;
+      color: #fff;
+    }
+    .person-count {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+    }
+    
+    /* Homework Tab */
+    .homework-container {
+      padding: 24px;
+      overflow-y: auto;
+    }
+    .hw-header {
+      background: rgba(239, 68, 68, 0.1);
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      padding: 16px 20px;
+      border-radius: 10px;
+      margin-bottom: 24px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .btn {
+      background: var(--accent);
+      color: white;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 6px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .btn:hover { background: var(--accent-hover); }
+    .btn-secondary {
+      background: rgba(255, 255, 255, 0.1);
+      border: 1px solid var(--border);
+    }
+    .btn-secondary:hover { background: rgba(255, 255, 255, 0.15); }
+    .btn-danger { background: var(--danger); }
+    .btn-danger:hover { background: var(--danger-hover); }
+    
+    /* Lightbox Modal */
+    .lightbox {
+      display: none;
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0,0,0,0.85);
+      backdrop-filter: blur(8px);
+      z-index: 9999;
+      align-items: center;
+      justify-content: center;
+    }
+    .lightbox.active { display: flex; }
+    .lightbox-content {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      max-width: 90vw;
+      max-height: 90vh;
+      display: flex;
+      overflow: hidden;
+      box-shadow: 0 25px 50px -12px rgba(0,0,0,0.7);
+    }
+    .lightbox-img-wrap {
+      flex: 2;
+      background: #000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 400px;
+      max-width: 65vw;
+      max-height: 85vh;
+    }
+    .lightbox-img-wrap img {
+      max-width: 100%;
+      max-height: 85vh;
+      object-fit: contain;
+    }
+    .lightbox-sidebar {
+      flex: 1;
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      min-width: 320px;
+      max-width: 420px;
+      border-left: 1px solid var(--border);
+      overflow-y: auto;
+    }
+    .close-btn {
+      align-self: flex-end;
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      font-size: 1.5rem;
+      cursor: pointer;
+    }
+    .close-btn:hover { color: #fff; }
+    
+    /* People Manager Modal */
+    .manager-modal {
+      display: none;
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0,0,0,0.85);
+      backdrop-filter: blur(8px);
+      z-index: 10000;
+      align-items: center;
+      justify-content: center;
+    }
+    .manager-modal.active { display: flex; }
+    .manager-box {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      width: 780px;
+      max-width: 92vw;
+      max-height: 88vh;
+      display: flex;
+      flex-direction: column;
+      box-shadow: 0 25px 50px -12px rgba(0,0,0,0.8);
+      overflow: hidden;
+    }
+    .manager-header {
+      padding: 16px 24px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .manager-body {
+      padding: 24px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+    }
+    .manager-section {
+      background: rgba(255,255,255,0.02);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px;
+    }
+    .manager-section h4 {
+      font-size: 0.95rem;
+      margin-bottom: 12px;
+      color: #60a5fa;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .merge-controls {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+    }
+    .merge-controls select {
+      flex: 1;
+      background: #141720;
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 8px 12px;
+      border-radius: 6px;
+      font-size: 0.9rem;
+    }
+    .naming-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 8px;
+    }
+    .naming-table th, .naming-table td {
+      padding: 8px 12px;
+      text-align: left;
+      font-size: 0.85rem;
+      border-bottom: 1px solid rgba(255,255,255,0.05);
+    }
+    .naming-table th { color: var(--text-muted); font-weight: 600; }
+    .naming-table input {
+      background: #141720;
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 6px 10px;
+      border-radius: 4px;
+      width: 100%;
+      font-size: 0.85rem;
+    }
+    .naming-table input:focus { border-color: var(--accent); outline: none; }
+  </style>
+</head>
+<body>
+
+  <!-- Top Header -->
+  <header>
+    <div class="logo">
+      <span style="font-size: 1.4rem;">🏛️</span>
+      <span>OFFLINE MUSEUM VIEWER</span>
+      <span class="badge">InsightFace ArcFace 512-d</span>
+    </div>
+    <div class="metrics">
+      <div class="metric-pill"><span>📸 Total Photos:</span> <strong id="mTotal">-</strong></div>
+      <div class="metric-pill"><span>📍 Cities:</span> <strong id="mCities">35</strong></div>
+      <div class="metric-pill"><span>👤 Family & Faces:</span> <strong id="mClusters">30</strong></div>
+      <div class="metric-pill"><span>📝 Homework/Docs:</span> <strong id="mHw" style="color: #f87171;">-</strong></div>
+    </div>
+  </header>
+
+  <!-- Main Tabs Bar -->
+  <nav class="tabs">
+    <button class="tab-btn active" onclick="switchTab('gallery')">🖼️ Gallery</button>
+    <button class="tab-btn" onclick="switchTab('map')">🗺️ Interactive Map</button>
+    <button class="tab-btn" onclick="switchTab('people')">👥 People & Faces</button>
+    <button class="tab-btn" onclick="switchTab('homework')">📝 Homework & Docs (<span id="hwBadge">0</span>)</button>
+  </nav>
+
+  <!-- Main Content Panes -->
+  <main>
+    <!-- 1. GALLERY TAB -->
+    <div id="tab-gallery" class="tab-pane active">
+      <div class="search-bar">
+        <input type="text" id="searchInput" class="search-input" placeholder="Search by AI description, city, country, date (YYYY-MM-DD), camera..." oninput="handleSearch()">
+        <div id="activeFilterTag" class="filter-tag"></div>
+      </div>
+      <div class="photo-grid-container" id="galleryScroll" onscroll="handleScroll(event)">
+        <div id="photoGrid" class="photo-grid"></div>
+        <div id="loadStatus" style="text-align: center; padding: 24px; color: var(--text-muted); font-size: 0.85rem;"></div>
+      </div>
+    </div>
+
+    <!-- 2. MAP TAB -->
+    <div id="tab-map" class="tab-pane">
+      <div id="map"></div>
+    </div>
+
+    <!-- 3. PEOPLE & FACES TAB -->
+    <div id="tab-people" class="tab-pane">
+      <div class="people-container">
+        <div class="people-action-bar">
+          <div>
+            <h3 class="section-title">👑 Core Family Members (Ranked by Frequency)</h3>
+            <p style="color: var(--text-muted); font-size: 0.85rem;">Clustered via ArcFace ResNet-50 metric embeddings with 5-point facial landmark alignment (Threshold: 0.48).</p>
+          </div>
+          <button class="btn btn-secondary" onclick="openPeopleManager()">⚙️ Manage & Merge People</button>
+        </div>
+        <div id="corePeopleGrid" class="people-grid"></div>
+
+        <h3 class="section-title">🤝 Recurring People & Friends</h3>
+        <div id="extendedPeopleGrid" class="people-grid"></div>
+      </div>
+    </div>
+
+    <!-- 4. HOMEWORK & DOCUMENTS TAB -->
+    <div id="tab-homework" class="tab-pane">
+      <div class="homework-container">
+        <div class="hw-header">
+          <div>
+            <h3 style="font-size: 1.05rem; margin-bottom: 4px; color: #fff;">📝 Document & Homework Segregation</h3>
+            <p id="hwDesc" style="color: var(--text-muted); font-size: 0.85rem;"></p>
+          </div>
+          <button class="btn btn-danger" onclick="exportCleanupScript()">📥 Export cleanup_homework.sh</button>
+        </div>
+        <div id="homeworkGrid" class="photo-grid"></div>
+      </div>
+    </div>
+  </main>
+
+  <!-- Lightbox Modal -->
+  <div id="lightbox" class="lightbox" onclick="closeLightbox(event)">
+    <div class="lightbox-content" onclick="event.stopPropagation()">
+      <div class="lightbox-img-wrap">
+        <img id="lightboxImg" src="" alt="">
+      </div>
+      <div class="lightbox-sidebar">
+        <button class="close-btn" onclick="closeLightbox()">&times;</button>
+        <h3 id="lbTitle" style="font-size: 1.1rem; line-height: 1.4; color: #fff;"></h3>
+        <p id="lbMeta" style="color: var(--text-muted); font-size: 0.85rem;">Date • Location</p>
+        <div style="background: rgba(255,255,255,0.03); border: 1px solid var(--border); padding: 12px; border-radius: 8px;">
+          <h4 style="font-size: 0.85rem; color: #60a5fa; margin-bottom: 6px;">Vision AI Description</h4>
+          <p id="lbDesc" style="font-size: 0.85rem; line-height: 1.5; color: var(--text);"></p>
+        </div>
+        <div>
+          <h4 style="font-size: 0.85rem; color: #60a5fa; margin-bottom: 4px;">Camera / EXIF</h4>
+          <p id="lbCamera" style="font-size: 0.8rem; color: var(--text-muted);"></p>
+        </div>
+        <div style="margin-top: auto;">
+          <p id="lbPath" style="font-size: 0.75rem; color: var(--text-muted); font-family: monospace; word-break: break-all;"></p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- People Manager & Merge Modal -->
+  <div id="peopleManagerModal" class="manager-modal" onclick="closePeopleManager(event)">
+    <div class="manager-box" onclick="event.stopPropagation()">
+      <div class="manager-header">
+        <h3 style="font-size: 1.1rem; color: #fff;">⚙️ Manage, Rename & Merge People</h3>
+        <button class="close-btn" onclick="closePeopleManager()">&times;</button>
+      </div>
+      <div class="manager-body">
+        <div class="manager-section">
+          <h4>🔀 Merge Two Clusters</h4>
+          <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 12px;">
+            If the AI split the same person into multiple clusters (e.g. childhood vs adulthood), select the source cluster to absorb into the target cluster.
+          </p>
+          <div class="merge-controls">
+            <select id="mergeSourceSelect"></select>
+            <span style="color: var(--text-muted);">➔</span>
+            <select id="mergeTargetSelect"></select>
+            <button class="btn" onclick="executeClusterMerge()">Merge</button>
+          </div>
+        </div>
+
+        <div class="manager-section">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+            <h4>✏️ Personal Naming</h4>
+            <button class="btn btn-secondary" style="font-size: 0.8rem;" onclick="saveCustomNames()">Save Names</button>
+          </div>
+          <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 12px;">
+            Assign human names (e.g. "Nikunj", "Dad", "Mom") to replace generic numbers.
+          </p>
+          <div style="max-height: 240px; overflow-y: auto;">
+            <table class="naming-table">
+              <thead>
+                <tr>
+                  <th style="width: 50px;">Avatar</th>
+                  <th style="width: 70px;">Cluster</th>
+                  <th style="width: 80px;">Photos</th>
+                  <th>Assigned Name</th>
+                </tr>
+              </thead>
+              <tbody id="namingTableBody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid var(--border); padding-top: 16px;">
+          <span style="font-size: 0.8rem; color: var(--text-muted);">Export a script to commit your browser merges to SQLite permanently.</span>
+          <button class="btn" style="background: #10b981;" onclick="exportMergeCommitScript()">💾 Export commit_merges.py</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <!-- Load the 32,424-record catalog data -->
+  <script src="catalog_data.js"></script>
+  <script>
+    // State
+    let filteredList = [];
+    let displayedCount = 0;
+    const BATCH_SIZE = 60;
+    let selectedPersonId = null;
+    let selectedCity = null;
+    let customNamesMap = {};
+    let pendingMerges = [];
+
+    // Helper: Smart image path fallback
+    function handleImgError(img, p, orig) {
+      if (!img.dataset.step) {
+        img.dataset.step = "1";
+        // Try toggling leading '../'
+        if (p.startsWith('../')) {
+          img.src = p.substring(3);
+        } else {
+          img.src = '../' + p;
+        }
+      } else if (img.dataset.step === "1") {
+        img.dataset.step = "2";
+        img.src = orig;
+      } else if (img.dataset.step === "2") {
+        img.dataset.step = "3";
+        if (orig.startsWith('../')) {
+          img.src = orig.substring(3);
+        } else {
+          img.src = '../' + orig;
+        }
+      }
+    }
+
+    // Initialize UI
+    window.addEventListener('DOMContentLoaded', () => {
+      if (typeof ALL_PHOTOS !== 'undefined') {
+        document.getElementById('mTotal').innerText = ALL_PHOTOS.length.toLocaleString();
+        const hwItems = ALL_PHOTOS.filter(p => p.hw);
+        document.getElementById('mHw').innerText = hwItems.length.toLocaleString();
+        document.getElementById('hwBadge').innerText = hwItems.length.toLocaleString();
+        document.getElementById('hwDesc').innerText = `These ${hwItems.length.toLocaleString()} photos were detected as notebooks, textbook pages, math equations, or screenshots.`;
+        
+        filteredList = ALL_PHOTOS.filter(p => !p.hw);
+        renderNextBatch();
+        renderPeople();
+        renderHomework(hwItems);
+      } else {
+        document.getElementById('photoGrid').innerHTML = '<div style="padding: 30px; color: #ef4444;">Error: catalog_data.js could not be loaded. Please ensure catalog_data.js exists in the same directory.</div>';
+      }
+    });
+
+    function switchTab(tabId) {
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+      
+      const targetBtn = Array.from(document.querySelectorAll('.tab-btn')).find(b => {
+        const oc = b.getAttribute('onclick') || '';
+        return oc.includes(`'${tabId}'`);
+      });
+      if (targetBtn) targetBtn.classList.add('active');
+
+      const targetPane = document.getElementById('tab-' + tabId);
+      if (targetPane) targetPane.classList.add('active');
+
+      if (tabId === 'map') {
+        if (!window.mapInitialized) {
+          initMap();
+        }
+        setTimeout(() => {
+          if (window.mapInstance) {
+            window.mapInstance.invalidateSize();
+          }
+        }, 150);
+      }
+    }
+
+    function renderNextBatch() {
+      const container = document.getElementById('photoGrid');
+      const nextSlice = filteredList.slice(displayedCount, displayedCount + BATCH_SIZE);
+      
+      if (nextSlice.length === 0) {
+        document.getElementById('loadStatus').innerText = displayedCount > 0 ? `Showing all ${displayedCount.toLocaleString()} photos` : 'No photos matched your filter.';
+        return;
+      }
+
+      const html = nextSlice.map(p => `
+        <div class="photo-card" onclick="openLightbox('${p.id}')">
+          <img class="card-thumb" 
+               src="${p.p}" 
+               onerror="handleImgError(this, '${p.p}', '${p.orig}')" 
+               loading="lazy" 
+               alt="${p.c || p.id}">
+          <div class="card-info">
+            <div class="card-title">${p.c || p.id}</div>
+            <div class="card-meta">
+              <span>${p.d || 'Unknown Date'}</span>
+              <span>${p.l || p.cam || ''}</span>
+            </div>
+          </div>
+        </div>
+      `).join('');
+
+      container.insertAdjacentHTML('beforeend', html);
+      displayedCount += nextSlice.length;
+      document.getElementById('loadStatus').innerText = `Showing ${displayedCount.toLocaleString()} of ${filteredList.length.toLocaleString()} photos (Scroll down for more)`;
+    }
+
+    function handleScroll(e) {
+      const el = e.target;
+      if (el.scrollHeight - el.scrollTop <= el.clientHeight + 400) {
+        if (displayedCount < filteredList.length) {
+          renderNextBatch();
+        }
+      }
+    }
+
+    function handleSearch() {
+      const q = document.getElementById('searchInput').value.toLowerCase().trim();
+      let baseList = ALL_PHOTOS.filter(p => !p.hw);
+
+      if (selectedPersonId !== null) {
+        baseList = baseList.filter(p => p.f && p.f.includes(selectedPersonId));
+      }
+      if (selectedCity !== null) {
+        baseList = baseList.filter(p => p.l && p.l.toLowerCase().includes(selectedCity.toLowerCase()));
+      }
+
+      if (!q) {
+        filteredList = baseList;
+      } else {
+        filteredList = baseList.filter(p => 
+          (p.c && p.c.toLowerCase().includes(q)) ||
+          (p.l && p.l.toLowerCase().includes(q)) ||
+          (p.d && p.d.includes(q)) ||
+          (p.cam && p.cam.toLowerCase().includes(q)) ||
+          (p.id && p.id.toLowerCase().includes(q))
+        );
+      }
+
+      document.getElementById('photoGrid').innerHTML = '';
+      displayedCount = 0;
+      renderNextBatch();
+    }
+
+    function filterByPerson(clusterId, name) {
+      if (selectedPersonId === clusterId) {
+        selectedPersonId = null;
+        clearFilterTag();
+      } else {
+        selectedPersonId = clusterId;
+        selectedCity = null;
+        showFilterTag(`Person: ${name}`, () => {
+          selectedPersonId = null;
+          clearFilterTag();
+          handleSearch();
+        });
+      }
+      switchTab('gallery');
+      handleSearch();
+    }
+
+    function filterByCity(cityName) {
+      selectedCity = cityName;
+      selectedPersonId = null;
+      showFilterTag(`City: ${cityName}`, () => {
+        selectedCity = null;
+        clearFilterTag();
+        handleSearch();
+      });
+      switchTab('gallery');
+      handleSearch();
+    }
+
+    function showFilterTag(label, onClear) {
+      const tag = document.getElementById('activeFilterTag');
+      tag.innerHTML = `<span>${label}</span> <span class="clear" onclick="event.stopPropagation();">&times;</span>`;
+      tag.style.display = 'flex';
+      tag.querySelector('.clear').onclick = onClear;
+    }
+
+    function clearFilterTag() {
+      const tag = document.getElementById('activeFilterTag');
+      tag.style.display = 'none';
+      tag.innerHTML = '';
+    }
+
+    function getClusterName(c) {
+      return customNamesMap[c.id] || c.name;
+    }
+
+    function renderPeople() {
+      if (typeof CORE_CLUSTERS === 'undefined') return;
+      
+      const coreGrid = document.getElementById('corePeopleGrid');
+      coreGrid.innerHTML = CORE_CLUSTERS.map(c => `
+        <div class="person-card ${selectedPersonId === c.id ? 'active-filter' : ''}" onclick="filterByPerson(${c.id}, '${getClusterName(c)}')">
+          <img class="person-avatar" src="avatars/cluster_${c.id}.jpg" onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=\\'http://www.w3.org/2000/svg\\' width=\\'96\\' height=\\'96\\'><rect width=\\'96\\' height=\\'96\\' fill=\\'%23334155\\'/><text x=\\'50%\\' y=\\'55%\\' dominant-baseline=\\'middle\\' text-anchor=\\'middle\\' fill=\\'white\\' font-size=\\'32\\'>👤</text></svg>'">
+          <div class="person-name">${getClusterName(c)}</div>
+          <div class="person-count">${c.count.toLocaleString()} photos</div>
+        </div>
+      `).join('');
+
+      if (typeof EXTENDED_CLUSTERS !== 'undefined') {
+        const extGrid = document.getElementById('extendedPeopleGrid');
+        extGrid.innerHTML = EXTENDED_CLUSTERS.map(c => `
+          <div class="person-card ${selectedPersonId === c.id ? 'active-filter' : ''}" onclick="filterByPerson(${c.id}, '${getClusterName(c)}')">
+            <img class="person-avatar" src="avatars/cluster_${c.id}.jpg" onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=\\'http://www.w3.org/2000/svg\\' width=\\'96\\' height=\\'96\\'><rect width=\\'96\\' height=\\'96\\' fill=\\'%23334155\\'/><text x=\\'50%\\' y=\\'55%\\' dominant-baseline=\\'middle\\' text-anchor=\\'middle\\' fill=\\'white\\' font-size=\\'32\\'>👤</text></svg>'">
+            <div class="person-name">${getClusterName(c)}</div>
+            <div class="person-count">${c.count.toLocaleString()} photos</div>
+          </div>
+        `).join('');
+      }
+    }
+
+    function renderHomework(items) {
+      const grid = document.getElementById('homeworkGrid');
+      grid.innerHTML = items.map(p => `
+        <div class="photo-card" onclick="openLightbox('${p.id}')">
+          <img class="card-thumb" 
+               src="${p.p}" 
+               onerror="handleImgError(this, '${p.p}', '${p.orig}')" 
+               loading="lazy" 
+               alt="${p.c || p.id}">
+          <div class="card-info">
+            <div class="card-title">${p.c || p.id}</div>
+            <div class="card-meta">
+              <span>${p.d || 'Unknown Date'}</span>
+              <span>📝 Document/Homework</span>
+            </div>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function initMap() {
+      if (typeof MAP_LOCATIONS === 'undefined') return;
+      window.mapInitialized = true;
+      
+      const streets = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
+        attribution: '&copy; Esri &mdash; Street Map',
+        maxZoom: 19
+      });
+      const satellite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+        attribution: '&copy; Esri &mdash; Satellite Imagery',
+        maxZoom: 19
+      });
+      const darkCanvas = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', {
+        attribution: '&copy; Esri &mdash; Dark Canvas',
+        maxZoom: 16
+      });
+      const topo = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}', {
+        attribution: '&copy; Esri &mdash; Topographic',
+        maxZoom: 19
+      });
+
+      const map = L.map('map', {
+        center: [25.0, 30.0],
+        zoom: 3,
+        layers: [streets]
+      });
+      window.mapInstance = map;
+
+      const baseLayers = {
+        "🗺️ Street Map": streets,
+        "🛰️ Satellite Imagery": satellite,
+        "🌙 Dark Canvas": darkCanvas,
+        "⛰️ Topographic": topo
+      };
+      L.control.layers(baseLayers, null, { position: 'topright' }).addTo(map);
+
+      MAP_LOCATIONS.forEach(loc => {
+        const marker = L.circleMarker([loc.lat, loc.lon], {
+          radius: Math.min(24, Math.max(8, Math.log2(loc.count) * 2.5)),
+          fillColor: "#3b82f6",
+          color: "#ffffff",
+          weight: 2,
+          opacity: 1,
+          fillOpacity: 0.85
+        }).addTo(map);
+
+        marker.bindPopup(`
+          <div style="font-family: system-ui, -apple-system, sans-serif; font-size: 13px; color: #f1f5f9; padding: 2px;">
+            <strong style="font-size: 15px; display: block; margin-bottom: 4px; color: #ffffff;">${loc.city}, ${loc.country}</strong>
+            <span style="color: #94a3b8; font-size: 12px; display: block; margin-bottom: 10px;">📸 ${loc.count.toLocaleString()} photos taken here</span>
+            <button onclick="filterByCity('${loc.city}')" style="background: #3b82f6; color: white; border: none; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 600; width: 100%;">View Photos</button>
+          </div>
+        `);
+      });
+
+      setTimeout(() => {
+        map.invalidateSize();
+      }, 200);
+    }
+
+    function openLightbox(id) {
+      const p = ALL_PHOTOS.find(x => x.id === id);
+      if (!p) return;
+      const imgEl = document.getElementById('lightboxImg');
+      imgEl.src = p.p;
+      imgEl.onerror = () => handleImgError(imgEl, p.p, p.orig);
+      document.getElementById('lbTitle').innerText = p.c || p.id;
+      document.getElementById('lbMeta').innerText = `${p.d || 'Unknown Date'} • ${p.l || 'No Location'}`;
+      document.getElementById('lbDesc').innerText = p.c || "Technical properties preserved. Natural language description will be generated during the full AI pass.";
+      document.getElementById('lbCamera').innerText = p.cam || 'Unknown Camera';
+      document.getElementById('lbPath').innerText = p.orig;
+      document.getElementById('lightbox').classList.add('active');
+    }
+
+    function closeLightbox(e) {
+      if (!e || e.target.id === 'lightbox' || e.target.classList.contains('close-btn')) {
+        document.getElementById('lightbox').classList.remove('active');
+      }
+    }
+
+    /* People Manager Modal Logic */
+    function getAllClusters() {
+      const all = [];
+      if (typeof CORE_CLUSTERS !== 'undefined') all.push(...CORE_CLUSTERS);
+      if (typeof EXTENDED_CLUSTERS !== 'undefined') all.push(...EXTENDED_CLUSTERS);
+      return all;
+    }
+
+    function openPeopleManager() {
+      const clusters = getAllClusters();
+      const sSelect = document.getElementById('mergeSourceSelect');
+      const tSelect = document.getElementById('mergeTargetSelect');
+      
+      const optionsHtml = clusters.map(c => `
+        <option value="${c.id}">${getClusterName(c)} (${c.count} photos)</option>
+      `).join('');
+      
+      sSelect.innerHTML = optionsHtml;
+      tSelect.innerHTML = optionsHtml;
+      if (clusters.length > 1) tSelect.selectedIndex = 1;
+
+      const tbody = document.getElementById('namingTableBody');
+      tbody.innerHTML = clusters.map(c => `
+        <tr>
+          <td>
+            <img src="avatars/cluster_${c.id}.jpg" style="width: 32px; height: 32px; border-radius: 50%; object-fit: cover;" onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=\\'http://www.w3.org/2000/svg\\' width=\\'32\\' height=\\'32\\'><rect width=\\'32\\' height=\\'32\\' fill=\\'%23334155\\'/></svg>'">
+          </td>
+          <td><strong>#${c.id}</strong></td>
+          <td>${c.count}</td>
+          <td>
+            <input type="text" data-cluster-id="${c.id}" value="${customNamesMap[c.id] || ''}" placeholder="${c.name}">
+          </td>
+        </tr>
+      `).join('');
+
+      document.getElementById('peopleManagerModal').classList.add('active');
+    }
+
+    function closePeopleManager(e) {
+      if (!e || e.target.id === 'peopleManagerModal' || e.target.classList.contains('close-btn')) {
+        document.getElementById('peopleManagerModal').classList.remove('active');
+      }
+    }
+
+    function executeClusterMerge() {
+      const srcId = parseInt(document.getElementById('mergeSourceSelect').value);
+      const tgtId = parseInt(document.getElementById('mergeTargetSelect').value);
+
+      if (srcId === tgtId) {
+        alert("Source and Target clusters must be different!");
+        return;
+      }
+
+      pendingMerges.push({ source: srcId, target: tgtId });
+
+      // Live update ALL_PHOTOS in memory
+      let mergedCount = 0;
+      ALL_PHOTOS.forEach(p => {
+        if (p.f && p.f.includes(srcId)) {
+          p.f = p.f.filter(x => x !== srcId);
+          if (!p.f.includes(tgtId)) p.f.push(tgtId);
+          mergedCount++;
+        }
+      });
+
+      // Update cluster counts
+      const clusters = getAllClusters();
+      const sClust = clusters.find(c => c.id === srcId);
+      const tClust = clusters.find(c => c.id === tgtId);
+      if (sClust && tClust) {
+        tClust.count += sClust.count;
+        sClust.count = 0;
+      }
+
+      renderPeople();
+      openPeopleManager();
+      alert(`Merged Cluster ${srcId} into Cluster ${tgtId}! Updated ${mergedCount} photos.`);
+    }
+
+    function saveCustomNames() {
+      const inputs = document.querySelectorAll('#namingTableBody input');
+      inputs.forEach(inp => {
+        const cid = parseInt(inp.getAttribute('data-cluster-id'));
+        const val = inp.value.trim();
+        if (val) {
+          customNamesMap[cid] = val;
+        } else {
+          delete customNamesMap[cid];
+        }
+      });
+      renderPeople();
+      alert("Names saved in viewer session! Click 'Export commit_merges.py' to save permanently to SQLite.");
+    }
+
+    function exportMergeCommitScript() {
+      const lines = [
+        "#!/usr/bin/env python3",
+        "\"\"\"",
+        "Automated SQLite Migration Script for People Merges & Custom Naming",
+        "Generated directly from viewer.html",
+        "\"\"\"",
+        "import sqlite3",
+        "from pathlib import Path",
+        "",
+        "DB_PATH = Path(__file__).resolve().parent / 'catalog.sqlite'",
+        "conn = sqlite3.connect(DB_PATH)",
+        "cursor = conn.cursor()",
+        ""
+      ];
+
+      pendingMerges.forEach(m => {
+        lines.push(`print("Merging cluster ${m.source} -> ${m.target}...")`);
+        lines.push(`cursor.execute("UPDATE people_faces SET cluster_id = ? WHERE cluster_id = ?", (${m.target}, ${m.source}))`);
+      });
+
+      Object.entries(customNamesMap).forEach(([cid, name]) => {
+        lines.push(`print("Renaming cluster ${cid} -> ${name}...")`);
+        lines.push(`cursor.execute("UPDATE people_faces SET person_name = ? WHERE cluster_id = ?", ('${name}', ${cid}))`);
+      });
+
+      lines.push("conn.commit()");
+      lines.push("conn.close()");
+      lines.push("print('✓ Successfully committed merges and custom names to catalog.sqlite!')");
+      lines.push("");
+      lines.push("# Re-export catalog_data.js");
+      lines.push("import subprocess, sys");
+      lines.push("subprocess.run([sys.executable, 'pipeline/export_viewer_data.py'], check=True)");
+
+      const blob = new Blob([lines.join('\n')], { type: 'text/x-python' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = "commit_merges.py";
+      a.click();
+    }
+
+    function exportCleanupScript() {
+      const hwItems = ALL_PHOTOS.filter(p => p.hw);
+      const lines = [
+        "#!/bin/bash",
+        "# Automated Cleanup Script for Document & Homework Photos",
+        "mkdir -p ../content/documents/homework_archive"
+      ];
+      hwItems.forEach(item => {
+        lines.push(`mv "${item.orig.replace('../', '')}" ../content/documents/homework_archive/ 2>/dev/null || true`);
+      });
+      const blob = new Blob([lines.join('\n')], { type: 'text/x-shellscript' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = "cleanup_homework.sh";
+      a.click();
+    }
+  </script>
+</body>
+</html>

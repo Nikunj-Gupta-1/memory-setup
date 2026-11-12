@@ -1,0 +1,35 @@
+# Python & Virtual Environments
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# OS & Editor Artifacts
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Private Media, Databases, Caches & Generated Outputs (Never Commit Personal Data)
+content/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.db
+.processing_cache/
+avatars/
+reports/
+_dedupe/
+catalog.json
+catalog_data.js
+ai_manifest.csv
+ai_manifest.json
+bin_detect_faces
+bin_face_extractor

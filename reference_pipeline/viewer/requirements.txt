@@ -1,0 +1,35 @@
+# Memory & Museum Archive Processing Pipeline Requirements
+# Generated: November 12, 2026
+# Python Runtime: Python 3.12 (macOS Apple Silicon arm64)
+
+# Core Computer Vision & Image Processing
+pillow==13.0.0
+numpy==2.5.4
+opencv-python==5.0.0.93
+opencv-python-headless==5.0.0.93
+scikit-image==0.26.0
+scipy==1.18.1
+imageio==2.38.1
+tifffile==2026.11.8
+
+# Deep Learning & Face Biometrics
+insightface==2.1
+onnx==1.23.2
+onnxruntime==1.31.1
+
+# Graph & Math
+networkx==3.7
+flatbuffers==25.12.19
+protobuf==7.36.2
+ml-dtypes==0.6.0
+
+# Utilities & Networking
+tqdm==4.70.1
+requests==2.34.2
+urllib3==2.8.0
+certifi==2026.10.23
+charset-normalizer==3.5.2
+idna==3.20
+packaging==26.3
+typing-extensions==4.16.0
+lazy-loader==0.6

@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Memory Setup — Local Media Intelligence Control Center</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <span>🧠</span>
+      <span>MEMORY SETUP</span>
+      <span class="pill">Local-First Intelligence Engine</span>
+    </div>
+    <div class="telemetry-strip">
+      <div class="tele-box">Free Disk: <strong id="teleDisk">-</strong></div>
+      <div class="tele-box">Ollama RAM: <strong id="teleRam">Idle</strong></div>
+      <div class="tele-box">Pipeline: <strong id="teleStage">Ready</strong></div>
+    </div>
+  </header>
+
+  <main class="container">
+    <!-- Step 1: Folder & Execution Mode -->
+    <section class="card">
+      <h2>1. Select Media Archive &amp; Processing Mode</h2>
+      <div class="row">
+        <input type="text" id="archivePath" class="input-text" placeholder="/path/to/your/photos_or_archive">
+        <button class="btn btn-secondary" onclick="browseFolder()">📁 Browse Folder...</button>
+        <button class="btn btn-secondary" onclick="runPreflight()">🔍 Audit Folder</button>
+      </div>
+
+      <div class="options-grid">
+        <div class="option-group">
+          <label class="title">Storage Mode</label>
+          <div class="segmented">
+            <button id="modeInPlace" class="seg-btn active" onclick="setMode('in_place')">In-Place Move (0 GB Extra)</button>
+            <button id="modeSafeCopy" class="seg-btn" onclick="setMode('safe_copy')">Safe Copy (Keep Originals)</button>
+          </div>
+        </div>
+
+        <div class="option-group">
+          <label class="title">AI Memory &amp; Speed Mode</label>
+          <div class="segmented">
+            <button id="speedWhisper" class="seg-btn active" onclick="setSpeed('whisper')">Whisper (Cool / 50-item recycle)</button>
+            <button id="speedTurbo" class="seg-btn" onclick="setSpeed('turbo')">Turbo (200-item recycle)</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="checks-row">
+        <label><input type="checkbox" id="chkBiometrics" checked> Enable Face Recognition &amp; Family Clustering (ArcFace 512-d)</label>
+        <label><input type="checkbox" id="chkVision" checked> Enable Local Vision AI Captions &amp; Homework Detection (Moondream)</label>
+      </div>
+    </section>
+
+    <!-- Step 2: Setup Wizard & Pre-Flight Diagnostics -->
+    <section class="card">
+      <h2>2. Environment &amp; Dependency Setup Wizard</h2>
+      <div class="diag-grid" id="diagGrid">
+        <div class="diag-item">
+          <div class="diag-head"><span>Disk Safety Floor</span><span id="diagDiskBadge" class="badge-warn">Pending</span></div>
+          <div class="diag-sub" id="diagDiskSub">Select an archive folder to verify &ge;15.0 GiB free space.</div>
+        </div>
+        <div class="diag-item">
+          <div class="diag-head"><span>Local VLM (Ollama)</span><span id="diagOllamaBadge" class="badge-warn">Checking...</span></div>
+          <div class="diag-sub" id="diagOllamaSub">Checking http://127.0.0.1:11434</div>
+          <div class="row">
+            <button class="btn btn-secondary" style="padding: 5px 10px; font-size: 0.78rem;" onclick="startOllama()">Start Ollama</button>
+            <button class="btn btn-secondary" style="padding: 5px 10px; font-size: 0.78rem;" onclick="pullMoondream()">Pull Moondream</button>
+          </div>
+        </div>
+        <div class="diag-item">
+          <div class="diag-head"><span>Biometrics (ArcFace)</span><span id="diagBioBadge" class="badge-warn">Checking...</span></div>
+          <div class="diag-sub" id="diagBioSub">Checking InsightFace &amp; ONNX providers...</div>
+        </div>
+        <div class="diag-item">
+          <div class="diag-head"><span>Metadata &amp; HEIC Tools</span><span id="diagToolsBadge" class="badge-warn">Checking...</span></div>
+          <div class="diag-sub" id="diagToolsSub">Checking ExifTool, sips, pillow-heif...</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Step 3: Archive Telemetry & Pipeline Execution -->
+    <section class="card">
+      <h2>3. Pipeline Execution &amp; Offline Museum</h2>
+      <div class="metrics-grid">
+        <div class="metric-card"><div class="val" id="mTotal">0</div><div class="lbl">Total Items</div></div>
+        <div class="metric-card"><div class="val" id="mPhotos">0</div><div class="lbl">Master Photos</div></div>
+        <div class="metric-card"><div class="val" id="mGeocoded">0</div><div class="lbl">Geocoded</div></div>
+        <div class="metric-card"><div class="val" id="mFaces">0</div><div class="lbl">Faces Indexed</div></div>
+        <div class="metric-card"><div class="val" id="mCaptioned">0</div><div class="lbl">AI Captioned</div></div>
+        <div class="metric-card"><div class="val" id="mHw">0</div><div class="lbl">Docs Flagged</div></div>
+      </div>
+
+      <div class="progress-wrap">
+        <div class="status-line">
+          <strong id="progressMsg">Ready to organize or sync your archive.</strong>
+          <span id="progressCounts">0 / 0</span>
+        </div>
+        <div class="progress-bar-bg">
+          <div id="progressFill" class="progress-bar-fill"></div>
+        </div>
+        <div class="status-line">
+          <span id="progressStage">Stage: idle</span>
+          <span id="progressRate"></span>
+        </div>
+      </div>
+
+      <div class="row">
+        <button id="btnStartAll" class="btn" onclick="startPipeline()">🚀 Organize &amp; Build Museum</button>
+        <button id="btnResumeVision" class="btn btn-secondary" onclick="startVisionOnly()">🧠 Resume Vision AI Only</button>
+        <button id="btnStop" class="btn btn-warning" onclick="stopPipeline()" disabled>⏸️ Pause &amp; Flush RAM</button>
+        <button class="btn btn-secondary" onclick="syncMuseum()">🔄 Refresh Museum Data</button>
+        <a id="btnOpenMuseum" class="btn btn-success" href="/archive/viewer/viewer.html" target="_blank" style="margin-left: auto;">🏛️ Open Offline Museum Viewer</a>
+      </div>
+    </section>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>

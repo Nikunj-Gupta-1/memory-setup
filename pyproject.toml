@@ -1,0 +1,49 @@
+[build-system]
+requires = ["hatchling>=1.24.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "memory-setup"
+version = "1.0.0"
+description = "Autonomous local media intelligence engine and offline museum viewer"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "pillow>=10.0.0",
+    "numpy>=1.26.0",
+    "scipy>=1.11.0",
+    "requests>=2.31.0",
+    "tqdm>=4.66.0",
+]
+
+[project.optional-dependencies]
+biometrics = [
+    "insightface>=0.7.3",
+    "onnx>=1.15.0",
+    "onnxruntime>=1.17.0",
+    "opencv-python-headless>=4.9.0",
+]
+heif = [
+    "pillow-heif>=0.16.0",
+]
+gui = [
+    "pywebview>=5.0",
+    "psutil>=5.9.0",
+]
+dev = [
+    "pytest>=8.0.0",
+]
+
+[project.scripts]
+memory-setup = "memory_setup.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["memory_setup"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"memory_setup/gui/static" = "memory_setup/gui/static"
+"memory_setup/viewer/template" = "memory_setup/viewer/template"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
