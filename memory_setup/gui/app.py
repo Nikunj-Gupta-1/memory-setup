@@ -6,6 +6,7 @@ import mimetypes
 import platform
 import socketserver
 import subprocess
+import sys
 import threading
 import time
 import urllib.parse
@@ -13,9 +14,9 @@ import webbrowser
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from memory_setup.config import ArchiveContext, OLLAMA_DEFAULT_MODEL
+from memory_setup.config import ArchiveContext, MIN_FREE_DISK_GB, OLLAMA_DEFAULT_MODEL
 from memory_setup.pipeline_runner import PipelineManager, get_archive_metrics
-from memory_setup.setup.checker import run_diagnostics
+from memory_setup.setup.checker import check_disk_space, estimate_directory_bytes, run_diagnostics
 from memory_setup.setup.installer import ensure_ollama_running, pull_ollama_model
 from memory_setup.viewer.builder import (
     merge_person_clusters,
@@ -69,6 +70,16 @@ class AppState:
         if self.selected_archive:
             self.manager.active_ctx = ArchiveContext(self.selected_archive)
         self.pull_status: Dict[str, Any] = {"running": False, "status": "idle"}
+        self.bio_install_status: Dict[str, Any] = {"running": False, "status": "idle"}
+
+    def snapshot(self) -> Dict[str, Any]:
+        status = self.manager.get_status()
+        status["pull"] = self.pull_status
+        status["bio_install"] = self.bio_install_status
+        status["selected_archive"] = str(self.selected_archive) if self.selected_archive else ""
+        if self.selected_archive and "archive" not in status:
+            status["archive"] = get_archive_metrics(self.selected_archive)
+        return status
 
 
 def create_app_server(
@@ -127,12 +138,7 @@ def create_app_server(
                 return
 
             if path == "/api/status":
-                status = state.manager.get_status()
-                status["pull"] = state.pull_status
-                status["selected_archive"] = str(state.selected_archive) if state.selected_archive else ""
-                if state.selected_archive and "archive" not in status:
-                    status["archive"] = get_archive_metrics(state.selected_archive)
-                self._send_json(200, status)
+                self._send_json(200, state.snapshot())
                 return
 
             if path == "/api/pipeline/events":
@@ -143,7 +149,7 @@ def create_app_server(
                 self.end_headers()
                 try:
                     for _ in range(1200):
-                        payload = json.dumps(state.manager.get_status())
+                        payload = json.dumps(state.snapshot())
                         self.wfile.write(f"data: {payload}\n\n".encode("utf-8"))
                         self.wfile.flush()
                         time.sleep(0.8)
@@ -176,20 +182,34 @@ def create_app_server(
 
             if path == "/api/browse-folder":
                 chosen = browse_native_folder()
-                if chosen:
+                target = body.get("target", "archive")
+                if chosen and target == "archive":
                     state.selected_archive = Path(chosen).resolve()
                     state.manager.active_ctx = ArchiveContext(state.selected_archive)
-                self._send_json(200, {"path": chosen})
+                self._send_json(200, {"path": chosen, "target": target})
                 return
 
             if path == "/api/preflight":
                 raw_path = body.get("archive_path") or (str(state.selected_archive) if state.selected_archive else None)
                 mode = body.get("mode", "in_place")
+                raw_sources = body.get("source_dirs") or []
+                src_dirs = [Path(s).expanduser().resolve() for s in raw_sources if str(s).strip()]
                 arch_path = Path(raw_path).expanduser().resolve() if raw_path else None
                 if arch_path:
                     state.selected_archive = arch_path
-                    state.manager.active_ctx = ArchiveContext(arch_path, mode=mode)
+                    state.manager.active_ctx = ArchiveContext(arch_path, source_dirs=src_dirs, mode=mode)
                 diag = run_diagnostics(archive_path=arch_path, mode=mode)
+                if mode == "safe_copy" and arch_path and src_dirs:
+                    src_gb = sum(estimate_directory_bytes(s) for s in src_dirs if s.exists()) / (1024 ** 3)
+                    free_gb = check_disk_space(arch_path)
+                    req_gb = src_gb + MIN_FREE_DISK_GB
+                    diag["disk"] = {
+                        **diag["disk"],
+                        "source_gb": round(src_gb, 2),
+                        "required_gb": round(req_gb, 2),
+                        "ok": free_gb >= req_gb,
+                        "message": f"{free_gb:.2f} GiB free (needs {req_gb:.2f} GiB incl. {src_gb:.2f} GiB copy)",
+                    }
                 if arch_path:
                     diag["archive"] = get_archive_metrics(arch_path)
                 self._send_json(200, diag)
@@ -221,16 +241,68 @@ def create_app_server(
                 self._send_json(200, {"ok": True, "pull": state.pull_status})
                 return
 
+            if path == "/api/setup/install-biometrics":
+                if not state.bio_install_status.get("running"):
+                    state.bio_install_status = {"running": True, "status": "Installing InsightFace, ONNX Runtime & OpenCV..."}
+
+                    def _bio_worker() -> None:
+                        try:
+                            proc = subprocess.run(
+                                [
+                                    sys.executable,
+                                    "-m",
+                                    "pip",
+                                    "install",
+                                    "insightface>=0.7.3",
+                                    "onnx>=1.15.0",
+                                    "onnxruntime>=1.17.0",
+                                    "opencv-python-headless>=4.9.0",
+                                ],
+                                capture_output=True,
+                                text=True,
+                                timeout=600,
+                            )
+                            if proc.returncode == 0:
+                                state.bio_install_status = {"running": False, "ok": True, "status": "Installed successfully!"}
+                            else:
+                                err = (proc.stderr or proc.stdout or "Install failed").strip().splitlines()[-1]
+                                state.bio_install_status = {"running": False, "ok": False, "status": err}
+                        except Exception as exc:
+                            state.bio_install_status = {"running": False, "ok": False, "status": str(exc)}
+
+                    threading.Thread(target=_bio_worker, daemon=True).start()
+                self._send_json(200, {"ok": True, "bio_install": state.bio_install_status})
+                return
+
             if path == "/api/pipeline/start":
                 raw_path = body.get("archive_path") or (str(state.selected_archive) if state.selected_archive else None)
                 if not raw_path:
                     self._send_json(400, {"error": "No archive folder selected."})
                     return
                 arch_path = Path(raw_path).expanduser().resolve()
+                mode = body.get("mode", "in_place")
+                raw_sources = body.get("source_dirs") or []
+                src_dirs = [Path(s).expanduser().resolve() for s in raw_sources if str(s).strip()]
+
+                if not body.get("force", False):
+                    free_gb = check_disk_space(arch_path)
+                    req_gb = MIN_FREE_DISK_GB
+                    if mode == "safe_copy" and src_dirs:
+                        req_gb += sum(estimate_directory_bytes(s) for s in src_dirs if s.exists()) / (1024 ** 3)
+                    if free_gb < req_gb:
+                        self._send_json(
+                            400,
+                            {
+                                "error": f"Disk safety check blocked launch ({free_gb:.2f} GiB free, needs {req_gb:.2f} GiB)."
+                            },
+                        )
+                        return
+
                 state.selected_archive = arch_path
                 ctx = ArchiveContext(
                     archive_root=arch_path,
-                    mode=body.get("mode", "in_place"),
+                    source_dirs=src_dirs,
+                    mode=mode,
                     speed_mode=body.get("speed_mode", "whisper"),
                     enable_biometrics=bool(body.get("enable_biometrics", True)),
                     enable_vision=bool(body.get("enable_vision", True)),
@@ -267,8 +339,12 @@ def create_app_server(
                 self._send_json(200, {"ok": True})
                 return
 
-            if path == "/api/homework/quarantine" and state.selected_archive is not None:
-                ctx = ArchiveContext(state.selected_archive)
+            if path == "/api/homework/quarantine":
+                raw_path = body.get("archive_path") or (str(state.selected_archive) if state.selected_archive else None)
+                if not raw_path:
+                    self._send_json(400, {"error": "No archive selected."})
+                    return
+                ctx = ArchiveContext(Path(raw_path).expanduser().resolve())
                 moved = quarantine_homework_files(ctx)
                 self._send_json(200, {"ok": True, "moved_count": moved})
                 return

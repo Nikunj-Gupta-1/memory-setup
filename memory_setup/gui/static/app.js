@@ -5,6 +5,10 @@ function setMode(mode) {
   currentMode = mode;
   document.getElementById('modeInPlace').classList.toggle('active', mode === 'in_place');
   document.getElementById('modeSafeCopy').classList.toggle('active', mode === 'safe_copy');
+  const srcRow = document.getElementById('safeCopySourceRow');
+  if (srcRow) {
+    srcRow.style.display = mode === 'safe_copy' ? 'flex' : 'none';
+  }
   runPreflight();
 }
 
@@ -14,13 +18,24 @@ function setSpeed(speed) {
   document.getElementById('speedTurbo').classList.toggle('active', speed === 'turbo');
 }
 
-async function browseFolder() {
-  const res = await fetch('/api/browse-folder', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+async function browseFolder(target = 'archive') {
+  const res = await fetch('/api/browse-folder', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ target })
+  });
   const data = await res.json();
   if (data.path) {
-    document.getElementById('archivePath').value = data.path;
+    const inputId = target === 'source' ? 'sourcePath' : 'archivePath';
+    document.getElementById(inputId).value = data.path;
     await runPreflight();
   }
+}
+
+function getSelectedSourceDirs() {
+  if (currentMode !== 'safe_copy') return [];
+  const raw = (document.getElementById('sourcePath')?.value || '').trim();
+  return raw ? raw.split(',').map(s => s.trim()).filter(Boolean) : [];
 }
 
 async function runPreflight() {
@@ -28,7 +43,11 @@ async function runPreflight() {
   const res = await fetch('/api/preflight', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ archive_path: archivePath || null, mode: currentMode })
+    body: JSON.stringify({
+      archive_path: archivePath || null,
+      mode: currentMode,
+      source_dirs: getSelectedSourceDirs()
+    })
   });
   const data = await res.json();
   renderDiagnostics(data);
@@ -65,16 +84,20 @@ function renderDiagnostics(d) {
 
   const bio = d.biometrics || {};
   const bioBadge = document.getElementById('diagBioBadge');
+  const btnInstallBio = document.getElementById('btnInstallBio');
   const providers = (d.onnx_providers || []).join(', ') || 'None';
   if (bio.package_installed && bio.weights_cached) {
     bioBadge.className = 'badge-ok';
     bioBadge.innerText = 'READY';
+    if (btnInstallBio) btnInstallBio.style.display = 'none';
   } else if (bio.package_installed) {
     bioBadge.className = 'badge-warn';
     bioBadge.innerText = 'ON FIRST RUN';
+    if (btnInstallBio) btnInstallBio.style.display = 'none';
   } else {
     bioBadge.className = 'badge-warn';
     bioBadge.innerText = 'OPTIONAL';
+    if (btnInstallBio) btnInstallBio.style.display = 'inline-flex';
   }
   document.getElementById('diagBioSub').innerText = `Providers: ${providers}`;
 
@@ -120,6 +143,14 @@ function renderPipelineState(s) {
   document.getElementById('progressFill').style.width = `${pct}%`;
   document.getElementById('progressRate').innerText = s.rate_img_s ? `${s.rate_img_s} img/s` : '';
 
+  if (s.pull && s.pull.running) {
+    const pct = s.pull.total ? ` (${Math.round((s.pull.completed / s.pull.total) * 100)}%)` : '';
+    document.getElementById('diagOllamaSub').innerText = `Pulling model: ${s.pull.status}${pct}`;
+  }
+  if (s.bio_install && s.bio_install.running) {
+    document.getElementById('diagBioSub').innerText = s.bio_install.status || 'Installing Face AI...';
+  }
+
   if (s.archive) renderArchiveMetrics(s.archive);
 }
 
@@ -134,14 +165,25 @@ async function pullMoondream() {
   document.getElementById('diagOllamaSub').innerText = 'Downloading moondream:latest in background...';
 }
 
+async function installBiometrics() {
+  await fetch('/api/setup/install-biometrics', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+  document.getElementById('diagBioSub').innerText = 'Installing InsightFace & ONNX Runtime in background...';
+}
+
 async function startPipeline(stages = null) {
   const archivePath = document.getElementById('archivePath').value.trim();
   if (!archivePath) { alert('Please select or enter an archive folder first.'); return; }
+  const sourceDirs = getSelectedSourceDirs();
+  if (currentMode === 'safe_copy' && sourceDirs.length === 0) {
+    alert('Safe Copy Mode requires selecting a Source Photos Folder to copy from.');
+    return;
+  }
   const res = await fetch('/api/pipeline/start', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       archive_path: archivePath,
+      source_dirs: sourceDirs,
       mode: currentMode,
       speed_mode: currentSpeed,
       enable_biometrics: document.getElementById('chkBiometrics').checked,
@@ -150,6 +192,10 @@ async function startPipeline(stages = null) {
     })
   });
   const data = await res.json();
+  if (!res.ok) {
+    alert(data.error || 'Could not start pipeline.');
+    return;
+  }
   if (data.status) renderPipelineState(data.status);
 }
 
@@ -174,6 +220,21 @@ async function syncMuseum() {
   const data = await res.json();
   if (data.archive) renderArchiveMetrics(data.archive);
   document.getElementById('progressMsg').innerText = 'Museum FTS5 & catalog_data.js synced!';
+}
+
+async function quarantineHomework() {
+  const archivePath = document.getElementById('archivePath').value.trim();
+  if (!archivePath) { alert('Select an archive folder first.'); return; }
+  const res = await fetch('/api/homework/quarantine', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ archive_path: archivePath })
+  });
+  const data = await res.json();
+  if (data.ok) {
+    document.getElementById('progressMsg').innerText = `Moved ${data.moved_count} flagged document(s) to content/documents/homework_archive/.`;
+    await runPreflight();
+  }
 }
 
 window.addEventListener('DOMContentLoaded', async () => {

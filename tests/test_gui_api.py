@@ -68,6 +68,15 @@ def test_gui_server_endpoints_and_museum_mount(tmp_path: Path) -> None:
         preflight = _post_json(f"{base}/api/preflight", {"archive_path": str(arch), "mode": "in_place"})
         assert "tools" in preflight and "disk" in preflight
 
+        safe_pre = _post_json(
+            f"{base}/api/preflight",
+            {"archive_path": str(arch), "mode": "safe_copy", "source_dirs": [str(arch / "content")]},
+        )
+        assert safe_pre["disk"]["mode"] == "safe_copy"
+
+        q_res = _post_json(f"{base}/api/homework/quarantine", {"archive_path": str(arch)})
+        assert q_res["ok"] is True
+
         ren = _post_json(f"{base}/api/people/rename", {"updates": [{"cluster_id": 0, "name": "Nikunj"}]})
         assert ren["ok"] is True
 

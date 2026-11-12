@@ -25,9 +25,14 @@
     <section class="card">
       <h2>1. Select Media Archive &amp; Processing Mode</h2>
       <div class="row">
-        <input type="text" id="archivePath" class="input-text" placeholder="/path/to/your/photos_or_archive">
-        <button class="btn btn-secondary" onclick="browseFolder()">📁 Browse Folder...</button>
+        <input type="text" id="archivePath" class="input-text" placeholder="Destination Archive Folder (e.g. C:\Users\You\Pictures\MyMuseum)">
+        <button class="btn btn-secondary" onclick="browseFolder('archive')">📁 Browse Archive...</button>
         <button class="btn btn-secondary" onclick="runPreflight()">🔍 Audit Folder</button>
+      </div>
+
+      <div id="safeCopySourceRow" class="row" style="display: none; margin-top: 10px;">
+        <input type="text" id="sourcePath" class="input-text" placeholder="Source Photos Folder to Copy From (Originals Untouched)">
+        <button class="btn btn-secondary" onclick="browseFolder('source')">📂 Browse Source...</button>
       </div>
 
       <div class="options-grid">
@@ -73,6 +78,9 @@
         <div class="diag-item">
           <div class="diag-head"><span>Biometrics (ArcFace)</span><span id="diagBioBadge" class="badge-warn">Checking...</span></div>
           <div class="diag-sub" id="diagBioSub">Checking InsightFace &amp; ONNX providers...</div>
+          <div class="row" id="bioInstallRow">
+            <button id="btnInstallBio" class="btn btn-secondary" style="padding: 5px 10px; font-size: 0.78rem;" onclick="installBiometrics()">Install Face AI</button>
+          </div>
         </div>
         <div class="diag-item">
           <div class="diag-head"><span>Metadata &amp; HEIC Tools</span><span id="diagToolsBadge" class="badge-warn">Checking...</span></div>
@@ -112,6 +120,7 @@
         <button id="btnResumeVision" class="btn btn-secondary" onclick="startVisionOnly()">🧠 Resume Vision AI Only</button>
         <button id="btnStop" class="btn btn-warning" onclick="stopPipeline()" disabled>⏸️ Pause &amp; Flush RAM</button>
         <button class="btn btn-secondary" onclick="syncMuseum()">🔄 Refresh Museum Data</button>
+        <button class="btn btn-secondary" onclick="quarantineHomework()">📄 Quarantine Docs</button>
         <a id="btnOpenMuseum" class="btn btn-success" href="/archive/viewer/viewer.html" target="_blank" style="margin-left: auto;">🏛️ Open Offline Museum Viewer</a>
       </div>
     </section>

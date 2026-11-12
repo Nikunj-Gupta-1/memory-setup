@@ -61,98 +61,66 @@ Memory_Setup/
 
 ---
 
-## Quick Start
+## Quick Start (100% GUI Control Center — No Terminal Required)
 
-### Option A: Windows Step-by-Step Setup Guide
+### Option A: Windows Step-by-Step Guide
 
-Follow these steps on **Windows 10 / Windows 11**:
+Everything works directly inside the graphical **Control Center** (`http://127.0.0.1:8765`) after double-clicking `Start_Memory_Setup.bat`:
 
-#### 1. Install Prerequisites
+#### 1. One-Time Prerequisites on Windows 10 / Windows 11
 1. **Python 3.10 – 3.12** *(3.12 recommended)*:
    * Download from [python.org/downloads/windows](https://www.python.org/downloads/windows/).
-   * **Important:** On the very first screen of the installer, check **"Add python.exe to PATH"** before clicking *Install Now*.
-   * Verify in Command Prompt or PowerShell:
-     ```bat
-     python --version
-     ```
+   * **Important:** On the very first installer screen, check **"Add python.exe to PATH"** before clicking *Install Now*.
 2. **Ollama (for local AI photo descriptions)**:
    * Download and install **Ollama for Windows** from [ollama.com/download/windows](https://ollama.com/download/windows).
-   * Open PowerShell or Command Prompt and pull the Moondream vision model (`~1.7 GB`):
-     ```bat
-     ollama pull moondream:latest
-     ```
-3. *(Optional)* **ExifTool** (faster metadata & video GPS extraction; falls back to built-in Pillow EXIF automatically if skipped):
-   ```bat
-   winget install OliverBetcher.ExifTool
-   ```
-4. *(Optional, for Face Recognition)* **Microsoft Visual C++ Redistributable**:
-   * Required on some fresh Windows PCs by ONNX Runtime / InsightFace. Install the **x64 Visual C++ Redistributable** from Microsoft if adding `[biometrics]`.
+   * After launching **Memory Setup**, you can click **Start Ollama** and **Pull Moondream** directly inside the GUI (no commands needed!).
+3. *(Optional)* **Microsoft Visual C++ Redistributable**:
+   * Only needed on some fresh Windows PCs if you enable Face Recognition (`Install Face AI` button in GUI).
 
-#### 2. Download & Launch Memory Setup
-* **Using Git:**
-  ```bat
-  git clone https://github.com/Nikunj-Gupta-1/memory-setup.git
-  cd memory-setup
-  ```
-* **Or without Git:** Click **Code -> Download ZIP** on GitHub, right-click the downloaded `.zip` -> **Extract All...**, and open the extracted `memory-setup` folder.
-* Double-click **`Start_Memory_Setup.bat`** (or run `.\Start_Memory_Setup.bat` from Command Prompt/PowerShell).
-  * *If Windows Defender SmartScreen shows "Windows protected your PC"*: click **More info** -> **Run anyway**.
-  * On first run, it automatically creates `.venv`, installs dependencies (`memory-setup` + `pillow-heif` for iPhone `.heic` photos), and opens the **Control Center** in your browser at `http://127.0.0.1:8765`.
+#### 2. Download & Launch (Zero Terminal Commands)
+1. Click **Code -> Download ZIP** on GitHub -> right-click the `.zip` -> **Extract All...** (or `git clone https://github.com/Nikunj-Gupta-1/memory-setup.git`).
+2. Open the extracted folder and double-click **`Start_Memory_Setup.bat`**.
+   * *If Windows Defender SmartScreen appears*: click **More info -> Run anyway**.
+   * On first launch, it creates `.venv`, installs dependencies (`pillow-heif` for iPhone `.heic` photos included), and automatically opens the **Control Center** in your browser.
 
-#### 3. (Optional) Enable Face Detection & Clustering on Windows
-Open Command Prompt / PowerShell inside the `memory-setup` folder and run once:
-```bat
-.venv\Scripts\pip.exe install -e ".[biometrics]"
-```
-
-#### 4. Safe First Test on Windows
-1. Copy **20–50 test photos** into a sample folder (for example `C:\Users\<You>\Desktop\TestPhotos`).
-2. In the browser Control Center (`http://127.0.0.1:8765`):
-   * Click **Browse Folder** (or paste your archive path) and pick a destination folder like `C:\Users\<You>\Desktop\TestMuseum`.
-   * Click **Run Pre-Flight Check** to confirm Python, free disk space, HEIC support, and Ollama are green.
-   * Select **Safe Copy Mode** (so `TestPhotos` is never altered), pick **Whisper Mode**, and click **Start Pipeline**.
-3. When Stage 5 finishes, click **Open Offline Museum** (or double-click `start_viewer.bat` inside `TestMuseum`).
-
-#### Windows CLI Reference
-```bat
-REM Pre-flight diagnostics
-.venv\Scripts\memory-setup.exe --setup
-
-REM Safe Copy from source photos into a brand-new Offline Museum folder
-.venv\Scripts\memory-setup.exe run C:\Path\To\NewArchive --safe-copy --source C:\Path\To\RawPhotos --whisper
-
-REM Rebuild only Offline Museum search/index files
-.venv\Scripts\memory-setup.exe sync C:\Path\To\NewArchive
-
-REM View archive counts safely (read-only)
-.venv\Scripts\memory-setup.exe status C:\Path\To\NewArchive
-```
+#### 3. Complete Workflow Inside the GUI
+1. **Setup Wizard Cards**:
+   * Click **Start Ollama** and **Pull Moondream** (`~1.7 GB` download) to enable offline AI photo descriptions.
+   * Click **Install Face AI** *(optional)* to install InsightFace ArcFace `buffalo_l` facial clustering right from the browser.
+2. **Choose Folders & Mode**:
+   * For **Safe First Test** (recommended with 20–50 sample photos): click **Safe Copy (Keep Originals)** -> pick an empty destination via **Browse Archive...** (e.g. `Desktop\TestMuseum`) and pick your sample folder via **Browse Source...** (`Desktop\TestPhotos`). Your original files are never touched.
+   * Click **Audit Folder** to check free disk space (`>= 15.0 GiB` safety floor) and verify dependencies.
+3. **Run & Browse**:
+   * Choose **Whisper** (lowest RAM / coolest) or **Turbo**, then click **Organize & Build Museum**.
+   * Use **Pause & Flush RAM** anytime to stop safely and resume later with **Resume Vision AI Only**.
+   * Click **Quarantine Docs** to move flagged homework/notes into `content/documents/homework_archive/`, or click **Open Offline Museum Viewer** to explore timeline, world map, people clusters (rename/merge live), and full-text search.
 
 ---
 
 ### Option B: macOS Quick Start
 
-1. **Prerequisites**: Python 3.10+ (`python3 --version`), [Ollama](https://ollama.com) (`ollama pull moondream:latest`), and optional `brew install exiftool`.
-2. **Clone & Launch**:
-   ```bash
-   git clone https://github.com/Nikunj-Gupta-1/memory-setup.git
-   cd memory-setup
-   chmod +x Start_Memory_Setup.command
-   ./Start_Memory_Setup.command
-   ```
-   *(If macOS blocks an extracted ZIP script, run `xattr -cr .` once inside the folder.)*
-3. **Optional Biometrics & Dev Tests**:
-   ```bash
-   .venv/bin/pip install -e ".[biometrics,dev]"
-   ```
-4. **CLI Usage**:
-   ```bash
-   .venv/bin/memory-setup --setup
-   .venv/bin/memory-setup run /path/to/NewArchive --safe-copy --source /path/to/RawPhotos --whisper
-   .venv/bin/memory-setup run /path/to/MyArchive --inplace --whisper
-   .venv/bin/memory-setup sync /path/to/MyArchive
-   .venv/bin/memory-setup status /path/to/MyArchive
-   ```
+1. **Prerequisites**: Python 3.10+ (`python3 --version`) and [Ollama](https://ollama.com).
+2. **Launch Control Center**:
+   * Double-click `Start_Memory_Setup.command` (or run `chmod +x Start_Memory_Setup.command && ./Start_Memory_Setup.command` once in Terminal; run `xattr -cr .` first if downloaded as a ZIP).
+   * Use **Start Ollama**, **Pull Moondream**, **Install Face AI**, **Browse Archive / Browse Source**, and **Open Offline Museum Viewer** directly in the browser UI.
+
+<details>
+<summary>Optional Headless CLI Commands (Advanced Users)</summary>
+
+```bash
+# Pre-flight hardware, disk, tool, and Ollama diagnostics
+memory-setup --setup
+
+# Run full pipeline in Safe Copy or In-Place mode
+memory-setup run /path/to/NewArchive --safe-copy --source /path/to/RawPhotos --whisper
+memory-setup run /path/to/MyArchive --inplace --whisper
+
+# Rebuild FTS5 index & Offline Museum assets / inspect status
+memory-setup sync /path/to/MyArchive
+memory-setup status /path/to/MyArchive
+```
+
+</details>
 
 ---
 
