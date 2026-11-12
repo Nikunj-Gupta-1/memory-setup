@@ -63,53 +63,96 @@ Memory_Setup/
 
 ## Quick Start
 
-### Prerequisites
-1. **Python 3.10+** (3.12 recommended).
-2. **Ollama** ([ollama.com](https://ollama.com)) for local Vision AI captioning:
-   ```bash
-   ollama pull moondream:latest
-   ```
-3. *(Optional, macOS)* **ExifTool** for fastest camera/video EXIF extraction (falls back to Pillow EXIF automatically):
-   ```bash
-   brew install exiftool
-   ```
+### Option A: Windows Step-by-Step Setup Guide
 
-### Option 1: 1-Click Desktop Control Center
-* **macOS:**
-  ```bash
+Follow these steps on **Windows 10 / Windows 11**:
+
+#### 1. Install Prerequisites
+1. **Python 3.10 – 3.12** *(3.12 recommended)*:
+   * Download from [python.org/downloads/windows](https://www.python.org/downloads/windows/).
+   * **Important:** On the very first screen of the installer, check **"Add python.exe to PATH"** before clicking *Install Now*.
+   * Verify in Command Prompt or PowerShell:
+     ```bat
+     python --version
+     ```
+2. **Ollama (for local AI photo descriptions)**:
+   * Download and install **Ollama for Windows** from [ollama.com/download/windows](https://ollama.com/download/windows).
+   * Open PowerShell or Command Prompt and pull the Moondream vision model (`~1.7 GB`):
+     ```bat
+     ollama pull moondream:latest
+     ```
+3. *(Optional)* **ExifTool** (faster metadata & video GPS extraction; falls back to built-in Pillow EXIF automatically if skipped):
+   ```bat
+   winget install OliverBetcher.ExifTool
+   ```
+4. *(Optional, for Face Recognition)* **Microsoft Visual C++ Redistributable**:
+   * Required on some fresh Windows PCs by ONNX Runtime / InsightFace. Install the **x64 Visual C++ Redistributable** from Microsoft if adding `[biometrics]`.
+
+#### 2. Download & Launch Memory Setup
+* **Using Git:**
+  ```bat
   git clone https://github.com/Nikunj-Gupta-1/memory-setup.git
   cd memory-setup
-  chmod +x Start_Memory_Setup.command
-  ./Start_Memory_Setup.command
   ```
-* **Windows:** Clone the repo and double-click `Start_Memory_Setup.bat`.
+* **Or without Git:** Click **Code -> Download ZIP** on GitHub, right-click the downloaded `.zip` -> **Extract All...**, and open the extracted `memory-setup` folder.
+* Double-click **`Start_Memory_Setup.bat`** (or run `.\Start_Memory_Setup.bat` from Command Prompt/PowerShell).
+  * *If Windows Defender SmartScreen shows "Windows protected your PC"*: click **More info** -> **Run anyway**.
+  * On first run, it automatically creates `.venv`, installs dependencies (`memory-setup` + `pillow-heif` for iPhone `.heic` photos), and opens the **Control Center** in your browser at `http://127.0.0.1:8765`.
 
-The launcher automatically creates `.venv`, installs dependencies (`memory_setup` + `pillow-heif`), and opens the Control Center at `http://127.0.0.1:8765`.
-
-### Option 2: Manual Virtualenv & CLI Usage
-```bash
-python3 -m venv .venv
-source .venv/bin/activate          # Windows: .venv\Scripts\activate
-pip install -e ".[heif,dev]"
-
-# Optional: Enable ArcFace 512-d facial recognition & clustering
-pip install -e ".[biometrics]"
-
-# Pre-flight hardware, disk, tool, and Ollama diagnostics
-memory-setup --setup
-
-# Run full pipeline in Safe Copy mode (originals remain untouched)
-memory-setup run /path/to/NewArchive --safe-copy --source /path/to/RawPhotos --whisper
-
-# Or organize directly in-place inside content/ and viewer/
-memory-setup run /path/to/MyArchive --inplace --whisper
-
-# Rebuild only the FTS5 index and Offline Museum catalog
-memory-setup sync /path/to/MyArchive
-
-# Check archive statistics safely (read-only)
-memory-setup status /path/to/MyArchive
+#### 3. (Optional) Enable Face Detection & Clustering on Windows
+Open Command Prompt / PowerShell inside the `memory-setup` folder and run once:
+```bat
+.venv\Scripts\pip.exe install -e ".[biometrics]"
 ```
+
+#### 4. Safe First Test on Windows
+1. Copy **20–50 test photos** into a sample folder (for example `C:\Users\<You>\Desktop\TestPhotos`).
+2. In the browser Control Center (`http://127.0.0.1:8765`):
+   * Click **Browse Folder** (or paste your archive path) and pick a destination folder like `C:\Users\<You>\Desktop\TestMuseum`.
+   * Click **Run Pre-Flight Check** to confirm Python, free disk space, HEIC support, and Ollama are green.
+   * Select **Safe Copy Mode** (so `TestPhotos` is never altered), pick **Whisper Mode**, and click **Start Pipeline**.
+3. When Stage 5 finishes, click **Open Offline Museum** (or double-click `start_viewer.bat` inside `TestMuseum`).
+
+#### Windows CLI Reference
+```bat
+REM Pre-flight diagnostics
+.venv\Scripts\memory-setup.exe --setup
+
+REM Safe Copy from source photos into a brand-new Offline Museum folder
+.venv\Scripts\memory-setup.exe run C:\Path\To\NewArchive --safe-copy --source C:\Path\To\RawPhotos --whisper
+
+REM Rebuild only Offline Museum search/index files
+.venv\Scripts\memory-setup.exe sync C:\Path\To\NewArchive
+
+REM View archive counts safely (read-only)
+.venv\Scripts\memory-setup.exe status C:\Path\To\NewArchive
+```
+
+---
+
+### Option B: macOS Quick Start
+
+1. **Prerequisites**: Python 3.10+ (`python3 --version`), [Ollama](https://ollama.com) (`ollama pull moondream:latest`), and optional `brew install exiftool`.
+2. **Clone & Launch**:
+   ```bash
+   git clone https://github.com/Nikunj-Gupta-1/memory-setup.git
+   cd memory-setup
+   chmod +x Start_Memory_Setup.command
+   ./Start_Memory_Setup.command
+   ```
+   *(If macOS blocks an extracted ZIP script, run `xattr -cr .` once inside the folder.)*
+3. **Optional Biometrics & Dev Tests**:
+   ```bash
+   .venv/bin/pip install -e ".[biometrics,dev]"
+   ```
+4. **CLI Usage**:
+   ```bash
+   .venv/bin/memory-setup --setup
+   .venv/bin/memory-setup run /path/to/NewArchive --safe-copy --source /path/to/RawPhotos --whisper
+   .venv/bin/memory-setup run /path/to/MyArchive --inplace --whisper
+   .venv/bin/memory-setup sync /path/to/MyArchive
+   .venv/bin/memory-setup status /path/to/MyArchive
+   ```
 
 ---
 
