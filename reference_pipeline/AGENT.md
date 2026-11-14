@@ -11,10 +11,10 @@ This environment operates across two distinct workspaces:
 
 1. **Active Media Archive & Museum Runtime**:  
    Path: `/Users/nikunjgupta/Downloads/images`  
-   Contains 33,771 personal photos and videos spanning 2007–2026. Organized into a strict two-folder contract (`content/` and `viewer/`).
+   Contains 33,771 personal photos and videos spanning 2007–2026. Organized into a strict two-folder contract (`content/` and `viewer/`). Stage 4 Vision (`stage4_vision.py`) has captioned **8,809 / 32,424** photos (**21** flagged docs) as of November 14, 2026.
 2. **Universal Standalone Application Repository**:  
    Path: `/Users/nikunjgupta/Downloads/PROJECTS/Memory_Setup`  
-   The target codebase for turning this pipeline into an autonomous, zero-config desktop application. Scaffolding is planned and aligned in `standalone_app_implementation_plan.md`.
+   **Implemented & Published**: Full GUI Control Center, CLI (`memory-setup`), 1-click Mac/Windows launchers, and `23/23` passing tests. Public GitHub repo: `https://github.com/Nikunj-Gupta-1/memory-setup`.
 
 ---
 
@@ -70,7 +70,7 @@ This environment operates across two distinct workspaces:
 4. **Ollama Memory Watchdog & Safeguards**:
    * Upstream `llama-server` defaults to an 8 GiB host prompt cache (`--cache-ram 8192`).
    * When processing image streams, always clamp context: `"options": {"num_ctx": 1024, "num_predict": 128, "temperature": 0}`.
-   * Periodically recycle the runner: every 200 images, send `{"model": "moondream:latest", "keep_alive": 0}`. In 0.015s, `llama-server` unloads, releasing 100% of accumulated cache and Metal buffers back to macOS. This keeps RAM strictly bounded to **~2.2 GB**.
+   * Periodically recycle the runner via `{"model": "moondream:latest", "keep_alive": 0}` (`stage4_vision.py` recycles every batch of 10 images; `Memory_Setup` recycles every 50 in Whisper / 200 in Turbo). In ~0.015s, `llama-server` unloads, flushing accumulated cache and Metal buffers back to macOS.
 5. **Anti-Clobber Rule for `viewer.html`**:  
    Never overwrite `viewer/viewer.html` with dummy or sample templates. `viewer.html` is the full production UI with 35-city Leaflet mapping, family face managers, and timeline scrubbers. Data updates must only touch `catalog_data.js` and `catalog.json` via `export_viewer_data.py`.
 6. **Homework / Document Classifier Rules**:  

@@ -91,12 +91,13 @@ The 352 MB SQLite database operates with Write-Ahead Logging (`PRAGMA journal_mo
 
 ---
 
-## 4. Current State & Active Background Processes
+## 4. Current State & Completed Standalone Implementation (November 14, 2026)
 
-1. **Current Active Background Process**:
-   * Running `pipeline/stage4_vision.py` continuously in the background.
-   * Single-worker execution, memory watchdog active with 200-item recycling, zero memory leaks.
-   * Progress is committed every 10 images; safe to pause or stop at any time via `Ctrl+C` or task management.
-2. **Upcoming Universal Standalone Application (`Memory_Setup`)**:
-   * Comprehensive 380-line architecture plan complete in `standalone_app_implementation_plan.md`.
-   * Ready for phase 1 scaffolding (Hatchling/uv project setup, Interactive Setup Wizard, Ingest & Normalization engine) once directed.
+1. **Active Reference Archive (`stage4_vision.py` in `/Users/nikunjgupta/Downloads/images`)**:
+   * All 7 reference pipeline bugs identified in audit (schema drift, `IGNORE_DIRNAMES` self-scan, proxy path prefixing, `> 150 km` geocoder fallthrough, >15,000 centroid overflow, `p.f` int list serialization, and `MAX(id)` continuity) were patched and syntax-verified.
+   * Background Moondream captioning has reached **8,809 / 32,424** photos (**27.2%**), with **21** study/document items flagged (`stage4_vision.py` running single-worker with 10-image runner recycling).
+   * Live Viewer Sync while Stage 4 runs: run `python3 pipeline/export_viewer_data.py` inside `viewer/` (read-only WAL query) rather than competing for SQLite write locks.
+2. **Completed Universal Standalone Application (`Memory_Setup`)**:
+   * Implemented full `memory-setup` Python package (`config.py`, `db.py`, `setup/`, `ingestion/`, `geocoding/`, `biometrics/`, `vision/`, `viewer/`, `pipeline_runner.py`, `gui/`, `cli.py`).
+   * Built 100% browser Control Center GUI (`127.0.0.1:8765`) supporting Safe Copy Archive + Source folder pickers, live Ollama start/pull streaming, 1-click Face AI install, Whisper (`50`-item recycle) vs Turbo (`200`-item recycle), cooperative Pause & Flush RAM, Quarantine Docs, and live read-only archive metrics polling.
+   * Added Windows & macOS 1-click launchers (`Start_Memory_Setup.bat`, `Start_Memory_Setup.command`), verified **23/23** tests passing (`pytest tests -v`), and published cleanly (zero personal data) to `https://github.com/Nikunj-Gupta-1/memory-setup`.

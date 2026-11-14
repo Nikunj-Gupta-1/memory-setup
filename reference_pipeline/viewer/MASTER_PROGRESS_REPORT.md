@@ -4,9 +4,9 @@
 **Master Media Directory**: `/Users/nikunjgupta/Downloads/images/content`  
 **Museum Viewer & Pipeline**: `/Users/nikunjgupta/Downloads/images/viewer`  
 **Universal Standalone Package**: `/Users/nikunjgupta/Downloads/PROJECTS/Memory_Setup`  
-**Current Date**: November 12, 2026  
-**Environment**: Apple M2 Pro, 16 GB Unified Memory, macOS 27.2, Python 3.15.2 (System) / Python 3.12.16 (Dedicated `.venv` for ArcFace), Ollama local VLM (`moondream:latest`).  
-**Disk Space Status**: 35.8 GiB available (safely above the 15.0 GiB safety limit).
+**Current Date**: November 14, 2026  
+**Environment**: Apple M2 Pro, 16 GB Unified Memory, macOS 27.2, Python 3.15.2 (System) / Python 3.12.16 (Dedicated `.venv` for ArcFace & `Memory_Setup`), Ollama local VLM (`moondream:latest`).  
+**Disk Space Status**: 49.59 GiB available (safely above the 15.0 GiB safety limit).
 
 ---
 
@@ -20,7 +20,7 @@ The local media-processing pipeline has consolidated, standardized, validated, i
 | **Stage 2: Metadata & Proxies** | EXIF/GPS extraction, reverse geocoding, proxy conversion | **100% Complete** | `metadata_exif`, `viewer/.processing_cache/` (14,679 JPEGs) |
 | **Stage 3: Validation & Manifest** | Byte validation, dHash perceptual hashing, date resolution | **100% Complete** | `ai_manifest` (32,424 rows), `ai_manifest.json` |
 | **Stage 4: Face Recognition & Upgrade** | InsightFace ArcFace ResNet-50, 5-point alignment, BLAS cluster | **100% Complete** | `people_faces` (43,119 baseline / 67,390 ArcFace), `avatars/` (30 avatars) |
-| **Stage 4: Vision AI Pass** | Local Ollama Moondream descriptions with Memory Watchdog | **In Progress (Active Background)** | Memory-bounded recycling active; 1,691+ images captioned |
+| **Stage 4: Vision AI Pass** | Local Ollama Moondream descriptions with Memory Watchdog | **In Progress (27.2%)** | Memory-bounded recycling active; 8,809 / 32,424 images captioned |
 | **Stage 5: Search & Offline Museum** | FTS5 index, `catalog.json`, `catalog_data.js`, `viewer.html` | **100% Complete** | Zero-config streaming launcher (`start_viewer.command`, `server.py`) |
 
 ---
@@ -42,7 +42,8 @@ Verified live against [`viewer/catalog.sqlite`](file:///Users/nikunjgupta/Downlo
   * Apple Vision Baseline: 43,119 faces across 15,923 photos in `people_faces`.
   * ArcFace Calibration: 67,390 faces detected with 5-point landmark alignment across archive; threshold calibrated at **0.48–0.50** for robust childhood-to-adulthood cross-age identity linking.
 * **FTS5 Virtual Search Table**: 32,424 records in `ai_search_fts`.
-* **AI Vision Descriptions**: 1,691 captioned items in `ai_descriptions`; exactly **4 true study documents/screenshots** flagged with 100% precision.
+* **AI Vision Descriptions**: **8,809** captioned items in `ai_descriptions` (27.2%); **21** study documents/screenshots flagged (`is_document_or_homework = 1`).
+* **Recurring People Clusters**: **2,040** distinct ArcFace clusters across **67,390** detected faces.
 
 ---
 
@@ -147,13 +148,12 @@ Verified live against [`viewer/catalog.sqlite`](file:///Users/nikunjgupta/Downlo
 
 ---
 
-## 5. Active Operations & Next Milestones
+## 5. Active Operations & Completed Standalone Release
 
-1. **Active Background Task**:
-   * Running: `stage4_vision.py` with memory watchdog active.
-   * Status: Continuously captioning master photos at ~0.50 img/s with zero memory leaks.
-   * Safe Interruption: Can be stopped at any time via `Ctrl+C` or process kill; records are committed in batches of 10 and the runner is evicted cleanly.
-2. **Upcoming Universal Standalone Package (`Memory_Setup`)**:
-   * Target: `/Users/nikunjgupta/Downloads/PROJECTS/Memory_Setup`.
-   * Status: Comprehensive architecture plan documented in `standalone_app_implementation_plan.md`.
-   * Ready for scaffolding once the user directs commencement.
+1. **Active Background Task (`stage4_vision.py`)**:
+   * Running continuously with memory watchdog active (**8,809 / 32,424** photos captioned, **21** docs flagged).
+   * Safe Live Sync: Run `python3 pipeline/export_viewer_data.py` inside `viewer/` to refresh `catalog_data.js` cleanly in WAL mode without interrupting Stage 4 writes.
+2. **Reference Pipeline Hardening (`viewer/pipeline/`)**:
+   * Applied 7 reliability fixes (`db.py` schema unification, `config.py` self-exclude dirs, `stage1_consolidate.py` `MAX(id)` continuity, `stage2_standardize.py` proxy prefix, `geocoder.py` strict `> 150 km` cutoff, `stage4_clustering.py` dynamic centroid capacity, `export_viewer_data.py` int-list `p.f` & `MAX(person_name)`).
+3. **Universal Standalone Application (`Memory_Setup`) — Shipped**:
+   * Built in `/Users/nikunjgupta/Downloads/PROJECTS/Memory_Setup` with full browser Control Center GUI (macOS & Windows 1-click `.command`/`.bat` launchers, Safe Copy Source/Archive pickers, live Ollama/Face AI setup, read-only live archive metrics), verified by **23/23** offline pytest checks, and published to `https://github.com/Nikunj-Gupta-1/memory-setup`.

@@ -86,16 +86,17 @@ protobuf==7.36.2             # Protocol buffer serialization
 | **Directory Restructure (2-Folder)** | APFS Inode Re-parenting (`os.rename`) | ~40 MB | **0 bytes** | **0.08 seconds** | 33,771 master files cleanly isolated into `content/` and `viewer/` |
 | **Stage 4 Upgrade: InsightFace Rescan** | Apple Silicon CoreML + CPU (`buffalo_l`) | ~810 MB | +86 MB (`catalog.sqlite`) | **31.2 minutes** | 32,424 master photos scanned; **67,390 faces detected** with 5-point alignment (**17.3 img/s**) |
 | **Stage 4 Upgrade: ArcFace BLAS Cluster** | Apple Accelerate BLAS (512-d unit vectors) | ~490 MB | +2 MB (Avatars & ranks) | **8.92 seconds** | 67,390 vectors clustered (thresh=0.48); **Top 9 family coverage expanded from 4.9k to 24.3k faces** |
-| **Stage 4: Vision Memory Watchdog & VLM** | M2 Pro GPU via Ollama (`moondream`) | ~2.2 GB (Bounded) | +5 MB (`catalog.sqlite`) | Continuous Background | 1,691 photos captioned; memory-bounded runner recycling active; 0 memory leaks |
+| **Stage 4: Vision Memory Watchdog & VLM** | M2 Pro GPU via Ollama (`moondream`) | ~2.2 GB (Bounded) | +12 MB (`catalog.sqlite`) | Continuous Background | 8,809 / 32,424 photos captioned (27.2%); memory-bounded runner recycling active |
 | **Stage 5: Zero-Config Streaming Server** | Python 3 `http.server` (port 8080) | ~25 MB | 0 bytes | Instant | Serves museum web application smoothly at `http://localhost:8080/viewer/viewer.html` |
+| **Standalone App (`Memory_Setup`)** | Python 3.12 (`uv` `.venv`), HTTP + SSE GUI | ~40 MB (Control Center) | <5 MB (Code + `.venv` excluded in Git) | Published (`23/23` pytest pass) | Cross-platform macOS/Windows GUI & CLI at `https://github.com/Nikunj-Gupta-1/memory-setup` |
 
 ---
 
 ## 5. Storage Space Ledger
 
 * **Initial Available Disk Space**: 29.53 GiB
-* **Current Available Disk Space**: **35.81 GiB**
-* **Disk Space Safety Status**: **PASSED** (138% above the 15.0 GiB safety floor).
+* **Current Available Disk Space**: **49.59 GiB** (November 14, 2026)
+* **Disk Space Safety Status**: **PASSED** (well above the 15.0 GiB safety floor).
 * **Storage Breakdown**:
   * **Master Media (`content/`)**: ~214 GiB (32,424 photos, 1,337 videos, 3 documents)
   * **Database (`viewer/catalog.sqlite`)**: 235 MB

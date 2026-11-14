@@ -5,18 +5,20 @@
 
 ---
 
-## 1. Project Goal
+## 1. Current Status & Architecture
 
-Transform the proven 5-stage media intelligence pipeline developed in `/Users/nikunjgupta/Downloads/images` into an **autonomous, zero-configuration standalone desktop application with a GUI** located here in `/Users/nikunjgupta/Downloads/PROJECTS/Memory_Setup`.
+* **Standalone App (`memory_setup/`)**: **Implemented & Verified** (`23/23` offline pytest checks passing).
+* **Public Repository**: `https://github.com/Nikunj-Gupta-1/memory-setup` (includes both `memory_setup/` standalone package and `reference_pipeline/` archive scripts/ledgers with zero personal data).
+* **1-Click Launchers**: `Start_Memory_Setup.command` (macOS) and `Start_Memory_Setup.bat` (Windows).
 
 The user contract:
-1. Ingest any chaotic folder of photos/videos in any arbitrary nested hierarchy.
-2. Provide a 1-click Setup Wizard for missing dependencies (Ollama, models, ONNX runtimes).
-3. Offer an **In-Place Reorganization Mode** (atomic APFS/NTFS renames, 0 extra disk space) and a **Safe Copy Mode** (preserves originals).
-4. Run the pipeline with strict memory bounds (single-worker, `<2.5 GB` RAM ceiling via runner recycling).
-5. Output strictly two folders in the user's destination:
+1. Ingest any chaotic folder of photos/videos in any arbitrary nested hierarchy (`sniffer.py` magic-byte header detection + `companions.py` Live Photo / sidecar grouping).
+2. 100% GUI Control Center (`http://127.0.0.1:8765`, zero CLI required) featuring native folder pickers, pre-flight audit, **Start Ollama**, live-progress **Pull Moondream**, 1-click **Install Face AI**, **Quarantine Docs**, and **Open Offline Museum Viewer**.
+3. **In-Place Reorganization Mode** (atomic pointer renames, 0 extra disk space) and **Safe Copy Mode** (preserves source originals with dedicated Archive + Source folder pickers).
+4. Memory-bounded VLM processing (single-worker `MemoryBoundedOllamaClient`, `cache_prompt: false`, `num_ctx: 1024`, `num_predict: 128`, **Whisper Mode** recycle every `50` items / **Turbo Mode** every `200` items, RSS watchdog).
+5. Strict two-folder archive contract:
    * **`content/`**: `images/YYYY/`, `videos/YYYY/`, and `documents/`.
-   * **`viewer/`**: Complete self-contained museum web application (`viewer.html`, `catalog.sqlite` with FTS5 search, `catalog_data.js`, face avatars, proxy cache, and zero-config local streaming launcher).
+   * **`viewer/`**: Self-contained Offline Museum (`viewer.html`, `catalog.sqlite` with FTS5 `ai_search_fts`, `catalog_data.js`, `catalog.json`, `avatars/`, `.processing_cache/`, `server.py`, `start_viewer.command`, `start_viewer.bat`).
 
 ---
 
@@ -46,7 +48,7 @@ Key reference files to consult:
 
 1. **Memory Ceiling (< 2.5 GB)**:
    * Upstream `llama-server` defaults to an 8 GiB host prompt cache (`--cache-ram 8192`).
-   * Standalone app must pass `cache_prompt: false` (or set `LLAMA_ARG_CACHE_RAM=0`), clamp context to `num_ctx: 1024`, and recycle the model runner (`keep_alive: 0`) every 200 images.
+   * Standalone app passes `cache_prompt: false`, sets `LLAMA_ARG_CACHE_RAM=0`, clamps `num_ctx: 1024` / `num_predict: 128`, and recycles the runner (`keep_alive: 0`) every `50` items (`whisper`) or `200` items (`turbo`), backed by an RSS watchdog (`3072 MB` limit).
 2. **Single Worker for VLM**:
    * Never run concurrent VLM threads. 1 worker only.
 3. **High-Precision Document Classification**:
