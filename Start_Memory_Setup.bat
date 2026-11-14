@@ -32,7 +32,7 @@ if not exist ".venv\Scripts\python.exe" (
     )
     echo Installing Memory Setup and dependencies...
     .venv\Scripts\python.exe -m pip install --upgrade pip
-    .venv\Scripts\python.exe -m pip install -e ".[heif]"
+    .venv\Scripts\python.exe -m pip install -e ".[heif,gui]"
     if errorlevel 1 (
         echo [ERROR] Failed to install dependencies.
         pause
@@ -40,7 +40,21 @@ if not exist ".venv\Scripts\python.exe" (
     )
 )
 
+if not exist "Memory Setup.lnk" (
+    if exist ".venv\Scripts\pythonw.exe" (
+        powershell -NoProfile -ExecutionPolicy Bypass -Command "$ws = New-Object -ComObject WScript.Shell; $s = $ws.CreateShortcut('%~dp0Memory Setup.lnk'); $s.TargetPath = '%~dp0.venv\Scripts\pythonw.exe'; $s.Arguments = '-m memory_setup.cli'; $s.WorkingDirectory = '%~dp0'; if (Test-Path '%~dp0memory_setup\gui\static\icon.ico') { $s.IconLocation = '%~dp0memory_setup\gui\static\icon.ico' }; $s.Save()" >nul 2>nul
+    )
+)
+
 set LLAMA_ARG_CACHE_RAM=0
+if not "%~1"=="" (
+    .venv\Scripts\python.exe -m memory_setup.cli %*
+    exit /b %errorlevel%
+)
+
 echo Starting Memory Setup Control Center...
-.venv\Scripts\python.exe -m memory_setup.cli %*
-pause
+if exist ".venv\Scripts\pythonw.exe" (
+    start "" ".venv\Scripts\pythonw.exe" -m memory_setup.cli
+) else (
+    start "" ".venv\Scripts\python.exe" -m memory_setup.cli
+)

@@ -1,17 +1,40 @@
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import platform
 import shutil
 import subprocess
+import sys
 import time
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 import requests
 
 from memory_setup.config import OLLAMA_DEFAULT_MODEL, OLLAMA_DEFAULT_URL
 from memory_setup.setup.checker import check_ollama
+
+BIOMETRICS_PACKAGES = (
+    "insightface>=0.7.3",
+    "onnx>=1.15.0",
+    "onnxruntime>=1.17.0",
+    "opencv-python-headless>=4.9.0",
+)
+
+
+def build_biometrics_install_command(python_executable: Optional[str] = None) -> List[str]:
+    """Build package-install command supporting both stdlib pip venvs and seedless uv venvs."""
+    py = python_executable or sys.executable
+    has_pip = importlib.util.find_spec("pip") is not None
+    uv_bin = shutil.which("uv")
+    if not has_pip and uv_bin:
+        return [uv_bin, "pip", "install", "--python", py, *BIOMETRICS_PACKAGES]
+    if has_pip:
+        return [py, "-m", "pip", "install", *BIOMETRICS_PACKAGES]
+    if uv_bin:
+        return [uv_bin, "pip", "install", "--python", py, *BIOMETRICS_PACKAGES]
+    raise RuntimeError("Neither pip nor uv is available to install Face AI packages.")
 
 
 def install_guidance() -> Dict[str, Any]:

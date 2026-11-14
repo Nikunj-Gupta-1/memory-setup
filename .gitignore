@@ -14,6 +14,7 @@ htmlcov/
 # OS & Editor Artifacts
 .DS_Store
 Thumbs.db
+*.lnk
 .vscode/
 .idea/
 
@@ -29,6 +30,8 @@ viewer/content
 *.sqlite-shm
 *.sqlite-wal
 *.db
+!memory_setup/geocoding/assets/
+!memory_setup/geocoding/assets/cities15000.sqlite
 .processing_cache/
 avatars/
 reports/

@@ -10,7 +10,11 @@ from typing import List, Optional
 
 from memory_setup.biometrics.cluster import cluster_and_generate_avatars
 from memory_setup.biometrics.detector import run_biometric_face_scan
-from memory_setup.config import ArchiveContext
+from memory_setup.config import (
+    ArchiveContext,
+    OLLAMA_RECYCLE_INTERVAL_TURBO,
+    OLLAMA_RECYCLE_INTERVAL_WHISPER,
+)
 from memory_setup.gui.app import launch_gui
 from memory_setup.ingestion.router import (
     run_stage1_consolidation,
@@ -182,8 +186,16 @@ def build_parser() -> argparse.ArgumentParser:
     p_run.add_argument("--source", action="append", default=[], help="Extra external source folder(s) for Safe Copy")
     p_run.add_argument("--inplace", action="store_true", help="Organize directly inside folder/content/ (default)")
     p_run.add_argument("--safe-copy", action="store_true", help="Copy files into folder/content/, leaving sources untouched")
-    p_run.add_argument("--whisper", action="store_true", help="Memory-safe VLM recycling every 200 items (default)")
-    p_run.add_argument("--turbo", action="store_true", help="Higher-throughput VLM recycling every 500 items")
+    p_run.add_argument(
+        "--whisper",
+        action="store_true",
+        help=f"Memory-safe VLM recycling every {OLLAMA_RECYCLE_INTERVAL_WHISPER} items (default)",
+    )
+    p_run.add_argument(
+        "--turbo",
+        action="store_true",
+        help=f"Higher-throughput VLM recycling every {OLLAMA_RECYCLE_INTERVAL_TURBO} items",
+    )
     p_run.add_argument("--no-biometrics", action="store_true", help="Skip ArcFace face scan and clustering")
     p_run.add_argument("--no-vision", action="store_true", help="Skip local Ollama vision AI captioning")
     p_run.add_argument("--stages", nargs="+", default=None, help="Explicit subset of stages to run")

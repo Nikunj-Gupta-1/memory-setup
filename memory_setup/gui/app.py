@@ -17,7 +17,11 @@ from typing import Any, Dict, Optional
 from memory_setup.config import ArchiveContext, MIN_FREE_DISK_GB, OLLAMA_DEFAULT_MODEL
 from memory_setup.pipeline_runner import PipelineManager, get_archive_metrics
 from memory_setup.setup.checker import check_disk_space, estimate_directory_bytes, run_diagnostics
-from memory_setup.setup.installer import ensure_ollama_running, pull_ollama_model
+from memory_setup.setup.installer import (
+    build_biometrics_install_command,
+    ensure_ollama_running,
+    pull_ollama_model,
+)
 from memory_setup.viewer.builder import (
     merge_person_clusters,
     quarantine_homework_files,
@@ -48,12 +52,27 @@ def browse_native_folder() -> Optional[str]:
         except Exception:
             pass
 
+    wv = sys.modules.get("webview")
+    if wv is not None and getattr(wv, "windows", None):
+        try:
+            dialog_type = getattr(getattr(wv, "FileDialog", None), "FOLDER", 20)
+            result = wv.windows[0].create_file_dialog(dialog_type)
+            if result:
+                return str(result[0]).rstrip("/\\") or str(result[0])
+            return None
+        except Exception:
+            pass
+
     try:
         import tkinter as tk
         from tkinter import filedialog
 
         root = tk.Tk()
         root.withdraw()
+        try:
+            root.attributes("-topmost", True)
+        except Exception:
+            pass
         selected = filedialog.askdirectory(title="Select Archive or Raw Media Folder")
         root.destroy()
         return selected or None
@@ -82,11 +101,28 @@ class AppState:
         return status
 
 
+class _DaemonThreadingHTTPServer(socketserver.ThreadingTCPServer):
+    """Multi-threaded HTTP server whose request threads never block interpreter shutdown."""
+
+    allow_reuse_address = True
+    daemon_threads = True
+    block_on_close = False
+
+    def __init__(self, server_address: tuple[str, int], RequestHandlerClass: Any, app_state: AppState) -> None:
+        self.shutdown_event = threading.Event()
+        self.app_state = app_state
+        super().__init__(server_address, RequestHandlerClass)
+
+    def server_close(self) -> None:
+        self.shutdown_event.set()
+        super().server_close()
+
+
 def create_app_server(
     default_archive: Optional[Path] = None,
     host: str = "127.0.0.1",
     port: int = 8765,
-) -> socketserver.ThreadingTCPServer:
+) -> _DaemonThreadingHTTPServer:
     state = AppState(default_archive=default_archive)
 
     class ControlCenterHandler(http.server.BaseHTTPRequestHandler):
@@ -133,7 +169,7 @@ def create_app_server(
             if path == "/" or path == "/index.html":
                 self._serve_file(STATIC_DIR / "index.html")
                 return
-            if path in ("/app.js", "/style.css"):
+            if path in ("/app.js", "/style.css", "/icon.png", "/icon.ico"):
                 self._serve_file(STATIC_DIR / path.lstrip("/"))
                 return
 
@@ -142,18 +178,26 @@ def create_app_server(
                 return
 
             if path == "/api/pipeline/events":
+                self.close_connection = True
                 self.send_response(200)
                 self.send_header("Content-Type", "text/event-stream")
                 self.send_header("Cache-Control", "no-cache")
-                self.send_header("Connection", "keep-alive")
+                self.send_header("Connection", "close")
                 self.end_headers()
+                shutdown_event: Optional[threading.Event] = getattr(
+                    self.server, "shutdown_event", None
+                )
                 try:
-                    for _ in range(1200):
+                    while shutdown_event is None or not shutdown_event.is_set():
                         payload = json.dumps(state.snapshot())
                         self.wfile.write(f"data: {payload}\n\n".encode("utf-8"))
                         self.wfile.flush()
-                        time.sleep(0.8)
-                except (BrokenPipeError, ConnectionResetError):
+                        if shutdown_event is not None:
+                            if shutdown_event.wait(0.8):
+                                break
+                        else:
+                            time.sleep(0.8)
+                except (BrokenPipeError, ConnectionResetError, OSError):
                     return
                 return
 
@@ -247,17 +291,9 @@ def create_app_server(
 
                     def _bio_worker() -> None:
                         try:
+                            cmd = build_biometrics_install_command(sys.executable)
                             proc = subprocess.run(
-                                [
-                                    sys.executable,
-                                    "-m",
-                                    "pip",
-                                    "install",
-                                    "insightface>=0.7.3",
-                                    "onnx>=1.15.0",
-                                    "onnxruntime>=1.17.0",
-                                    "opencv-python-headless>=4.9.0",
-                                ],
+                                cmd,
                                 capture_output=True,
                                 text=True,
                                 timeout=600,
@@ -351,13 +387,64 @@ def create_app_server(
 
             self._send_json(404, {"error": "Unknown API endpoint"})
 
-    socketserver.ThreadingTCPServer.allow_reuse_address = True
     for candidate_port in range(port, port + 20):
         try:
-            return socketserver.ThreadingTCPServer((host, candidate_port), ControlCenterHandler)
+            return _DaemonThreadingHTTPServer((host, candidate_port), ControlCenterHandler, app_state=state)
         except OSError:
             continue
-    return socketserver.ThreadingTCPServer((host, 0), ControlCenterHandler)
+    return _DaemonThreadingHTTPServer((host, 0), ControlCenterHandler, app_state=state)
+
+
+def get_window_icon_path(system_name: Optional[str] = None) -> Optional[Path]:
+    """Return the native window icon path (.ico on Windows WinForms, .png on macOS/Linux)."""
+    sys_name = system_name or platform.system()
+    filename = "icon.ico" if sys_name == "Windows" else "icon.png"
+    candidate = STATIC_DIR / filename
+    return candidate if candidate.exists() else None
+
+
+def _shutdown_control_center(
+    server: _DaemonThreadingHTTPServer,
+    wait_pipeline_seconds: float = 2.0,
+) -> None:
+    """Stop SSE streams, signal any active pipeline to pause safely, and close HTTP sockets."""
+    if getattr(server, "_did_shutdown", False):
+        return
+    server._did_shutdown = True
+    server.shutdown_event.set()
+    manager = server.app_state.manager
+    if manager.get_status().get("running"):
+        manager.stop()
+        worker = getattr(manager, "_thread", None)
+        if worker is not None and worker.is_alive():
+            worker.join(timeout=wait_pipeline_seconds)
+    server.shutdown()
+    server.server_close()
+
+
+def _configure_macos_app_identity() -> None:
+    """Set macOS Dock icon and menu bar app title even when invoked directly via python."""
+    if platform.system() != "Darwin":
+        return
+    try:
+        import AppKit  # type: ignore
+        import Foundation  # type: ignore
+
+        bundle = AppKit.NSBundle.mainBundle()
+        info = bundle.localizedInfoDictionary() or bundle.infoDictionary()
+        if info is not None:
+            info["CFBundleName"] = "Memory Setup"
+            info["CFBundleDisplayName"] = "Memory Setup"
+
+        Foundation.NSProcessInfo.processInfo().setProcessName_("Memory Setup")
+        app = AppKit.NSApplication.sharedApplication()
+        icon_path = STATIC_DIR / "icon.png"
+        if icon_path.exists():
+            image = AppKit.NSImage.alloc().initWithContentsOfFile_(str(icon_path))
+            if image is not None:
+                app.setApplicationIconImage_(image)
+    except Exception:
+        pass
 
 
 def launch_gui(
@@ -374,15 +461,50 @@ def launch_gui(
     if use_webview:
         try:
             import webview  # type: ignore
+        except ImportError:
+            webview = None
 
-            srv_thread = threading.Thread(target=server.serve_forever, daemon=True)
+        if webview is not None:
+            _configure_macos_app_identity()
+            srv_thread = threading.Thread(
+                target=server.serve_forever,
+                kwargs={"poll_interval": 0.2},
+                daemon=True,
+            )
             srv_thread.start()
-            webview.create_window("Memory Setup — Local Media Intelligence", url, width=1240, height=840)
-            webview.start()
-            server.shutdown()
-            return
-        except Exception:
-            pass
+            window = webview.create_window(
+                "Memory Setup — Local Media Intelligence",
+                url,
+                width=1240,
+                height=840,
+            )
+
+            def _on_closing() -> None:
+                server.shutdown_event.set()
+                if server.app_state.manager.get_status().get("running"):
+                    server.app_state.manager.stop()
+
+            def _on_closed() -> None:
+                server.shutdown_event.set()
+
+            window.events.closing += _on_closing
+            window.events.closed += _on_closed
+
+            icon_file = get_window_icon_path()
+            start_kwargs: Dict[str, Any] = {}
+            if icon_file is not None:
+                start_kwargs["icon"] = str(icon_file)
+
+            try:
+                webview.start(**start_kwargs)
+                _shutdown_control_center(server)
+                return
+            except Exception as exc:
+                server.shutdown()
+                print(
+                    f"Native webview unavailable ({exc}); falling back to default browser.",
+                    file=sys.stderr,
+                )
 
     print("=" * 64)
     print("MEMORY SETUP — LOCAL MEDIA INTELLIGENCE CONTROL CENTER")
@@ -395,7 +517,8 @@ def launch_gui(
     if open_browser:
         webbrowser.open(url)
     try:
-        server.serve_forever()
+        server.serve_forever(poll_interval=0.2)
     except KeyboardInterrupt:
         print("\nMemory Setup stopped cleanly.")
-        server.shutdown()
+    finally:
+        _shutdown_control_center(server)

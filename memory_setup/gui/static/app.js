@@ -253,4 +253,12 @@ window.addEventListener('DOMContentLoaded', async () => {
       renderPipelineState(payload);
     } catch (_) {}
   };
+
+  const closeStream = () => {
+    try {
+      evtSource.close();
+    } catch (_) {}
+  };
+  window.addEventListener('pagehide', closeStream);
+  window.addEventListener('beforeunload', closeStream);
 });

@@ -24,3 +24,21 @@ def test_geocoder_strict_150km_ocean_cutoff() -> None:
 
     # Middle of the Pacific Ocean
     assert reverse_geocode(0.0, -160.0, max_distance_km=150.0) == (None, None, None)
+
+
+def test_geocoder_bundled_cities15000_sqlite() -> None:
+    from pathlib import Path
+    import memory_setup.geocoding.offline_tree as ot
+
+    db_path = Path(ot.__file__).resolve().parent / "assets" / "cities15000.sqlite"
+    assert db_path.exists()
+    geo = OfflineGeocoder(cities_db_path=db_path)
+    assert len(geo.cities) > 25000
+
+    city_ldn, _, country_ldn = geo.lookup(51.51, -0.13)
+    assert city_ldn == "London"
+    assert country_ldn == "United Kingdom"
+
+    city_nyc, _, country_nyc = geo.lookup(40.71, -74.01)
+    assert "New York" in (city_nyc or "")
+    assert country_nyc == "United States"

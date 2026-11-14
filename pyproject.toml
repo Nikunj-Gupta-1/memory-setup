@@ -43,6 +43,7 @@ packages = ["memory_setup"]
 [tool.hatch.build.targets.wheel.force-include]
 "memory_setup/gui/static" = "memory_setup/gui/static"
 "memory_setup/viewer/template" = "memory_setup/viewer/template"
+"memory_setup/geocoding/assets" = "memory_setup/geocoding/assets"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

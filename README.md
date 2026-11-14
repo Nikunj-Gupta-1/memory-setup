@@ -40,7 +40,7 @@ Memory_Setup/
 │   ├── pipeline_runner.py         # Multi-stage orchestrator & archive metrics
 │   ├── setup/                     # Hardware, disk, ExifTool/sips & Ollama diagnostics
 │   ├── ingestion/                 # Magic-byte sniffer, companion pairing, Stages 1-3
-│   ├── geocoding/                 # Offline 3D ECEF KD-Tree geocoder
+│   ├── geocoding/                 # Offline 3D ECEF KD-Tree geocoder + cities15000.sqlite
 │   ├── biometrics/                # InsightFace detector & BLAS Leader Clustering
 │   ├── vision/                    # Document classifier & MemoryBoundedOllamaClient
 │   ├── viewer/                    # Stage 5 FTS5 indexer, JS exporter & museum template
@@ -53,10 +53,12 @@ Memory_Setup/
 │       ├── server.py              # Zero-dependency museum server + live rename/merge API
 │       ├── start_viewer.command   # 1-click archive museum launcher
 │       └── *.md                   # Manifesto, Progress Report, System Ledger & Handoff
-├── tests/                         # 23 unit & integration tests (offline/mocked VLM)
+├── scripts/                       # Native macOS universal launcher C source
+├── tests/                         # 29 unit & integration tests (offline/mocked VLM)
 ├── pyproject.toml
-├── Start_Memory_Setup.command     # 1-click macOS launcher
-└── Start_Memory_Setup.bat         # 1-click Windows launcher
+├── Memory Setup.app/              # 1-click zero-Terminal macOS app bundle
+├── Start_Memory_Setup.command     # macOS setup & detached launcher
+└── Start_Memory_Setup.bat         # Windows setup & silent pythonw/shortcut launcher
 ```
 
 ---
@@ -81,7 +83,7 @@ Everything works directly inside the graphical **Control Center** (`http://127.0
 1. Click **Code -> Download ZIP** on GitHub -> right-click the `.zip` -> **Extract All...** (or `git clone https://github.com/Nikunj-Gupta-1/memory-setup.git`).
 2. Open the extracted folder and double-click **`Start_Memory_Setup.bat`**.
    * *If Windows Defender SmartScreen appears*: click **More info -> Run anyway**.
-   * On first launch, it creates `.venv`, installs dependencies (`pillow-heif` for iPhone `.heic` photos included), and automatically opens the **Control Center** in your browser.
+   * On first launch, it creates `.venv`, installs dependencies (`pillow-heif` for iPhone `.heic` photos + `pywebview` GUI), generates a silent **`Memory Setup.lnk`** shortcut with custom icon, and launches the Control Center via `pythonw.exe` without keeping a console window open.
 
 #### 3. Complete Workflow Inside the GUI
 1. **Setup Wizard Cards**:
@@ -101,8 +103,9 @@ Everything works directly inside the graphical **Control Center** (`http://127.0
 
 1. **Prerequisites**: Python 3.10+ (`python3 --version`) and [Ollama](https://ollama.com).
 2. **Launch Control Center**:
-   * Double-click `Start_Memory_Setup.command` (or run `chmod +x Start_Memory_Setup.command && ./Start_Memory_Setup.command` once in Terminal; run `xattr -cr .` first if downloaded as a ZIP).
-   * Use **Start Ollama**, **Pull Moondream**, **Install Face AI**, **Browse Archive / Browse Source**, and **Open Offline Museum Viewer** directly in the browser UI.
+   * Double-click **`Memory Setup.app`** (or `Start_Memory_Setup.command` on first setup; run `xattr -cr .` first if downloaded as a ZIP).
+   * After `.venv` is ready, `Memory Setup.app` launches directly with **no Terminal window**, custom app icon, and `"Memory Setup"` in the Dock/menu bar (`Start_Memory_Setup.command` also detaches and closes its Terminal window).
+   * Use **Start Ollama**, **Pull Moondream**, **Install Face AI**, **Browse Archive / Browse Source**, and **Open Offline Museum Viewer** directly in the UI.
 
 <details>
 <summary>Optional Headless CLI Commands (Advanced Users)</summary>

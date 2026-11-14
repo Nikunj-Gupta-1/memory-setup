@@ -4,6 +4,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from memory_setup.setup.checker import check_disk_space, check_ollama, run_diagnostics
+from memory_setup.setup.installer import BIOMETRICS_PACKAGES, build_biometrics_install_command
 
 
 def test_check_disk_space_returns_positive_gib(tmp_path: Path) -> None:
@@ -43,3 +44,23 @@ def test_run_diagnostics_low_disk_flag(tmp_path: Path) -> None:
 
     assert diag["disk"]["ok"] is False
     assert diag["disk"]["free_gb"] == 5.0
+
+
+def test_build_biometrics_install_command_uses_uv_when_pip_missing() -> None:
+    with (
+        patch("memory_setup.setup.installer.importlib.util.find_spec", return_value=None),
+        patch("memory_setup.setup.installer.shutil.which", return_value="/opt/homebrew/bin/uv"),
+    ):
+        cmd = build_biometrics_install_command("/tmp/.venv/bin/python")
+
+    assert cmd == ["/opt/homebrew/bin/uv", "pip", "install", "--python", "/tmp/.venv/bin/python", *BIOMETRICS_PACKAGES]
+
+
+def test_build_biometrics_install_command_uses_pip_when_present() -> None:
+    with (
+        patch("memory_setup.setup.installer.importlib.util.find_spec", return_value=object()),
+        patch("memory_setup.setup.installer.shutil.which", return_value=None),
+    ):
+        cmd = build_biometrics_install_command("/tmp/.venv/bin/python")
+
+    assert cmd == ["/tmp/.venv/bin/python", "-m", "pip", "install", *BIOMETRICS_PACKAGES]

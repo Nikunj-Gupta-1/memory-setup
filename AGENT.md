@@ -7,10 +7,10 @@
 
 ## 1. Current Status & Architecture
 
-* **Standalone App (`memory_setup/`)**: **Implemented & Verified** (`23/23` pytest checks passing).
+* **Standalone App (`memory_setup/`)**: **Implemented & Verified** (`29/29` pytest checks passing).
 * **Public Repository**: `https://github.com/Nikunj-Gupta-1/memory-setup` (includes `memory_setup/` standalone package, `reference_pipeline/` scripts/ledgers with zero personal data, and `tests/`).
 * **Local Personal Archive (Gitignored)**: Any live archive operated alongside this repository lives under gitignored `archive/` (`archive/content/` + `archive/viewer/`) using the unified Python 3.12 `.venv` at the repository root. **Never** stage, commit, or push anything inside `archive/`, `content/`, `*.sqlite*`, `.processing_cache/`, `avatars/`, `catalog_data.js`, `catalog.json`, `ai_manifest.*`, or `viewer/content` symlinks.
-* **1-Click Launchers**: `Start_Memory_Setup.command` (macOS) and `Start_Memory_Setup.bat` (Windows).
+* **1-Click Launchers**: `Memory Setup.app` / `Start_Memory_Setup.command` (macOS, zero-Terminal after setup) and `Start_Memory_Setup.bat` -> `Memory Setup.lnk` (Windows, `pythonw.exe` silent shortcut).
 
 The user contract:
 1. Ingest any chaotic folder of photos/videos in any arbitrary nested hierarchy (`sniffer.py` magic-byte header detection + `companions.py` Live Photo / sidecar grouping).
