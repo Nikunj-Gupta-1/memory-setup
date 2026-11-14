@@ -65,9 +65,9 @@ Memory_Setup/
 
 ## Quick Start (100% GUI Control Center — No Terminal Required)
 
-### Option A: Windows Step-by-Step Guide
+### Option A: Windows 10 / Windows 11 Step-by-Step Guide
 
-Everything works directly inside the graphical **Control Center** (`http://127.0.0.1:8765`) after double-clicking `Start_Memory_Setup.bat`:
+Memory Setup launches directly as a native desktop **Control Center** window (backed by a local server starting on port `8765`, with automatic browser fallback if Edge WebView2 is absent).
 
 #### 1. One-Time Prerequisites on Windows 10 / Windows 11
 1. **Python 3.10 – 3.12** *(3.12 recommended)*:
@@ -75,44 +75,61 @@ Everything works directly inside the graphical **Control Center** (`http://127.0
    * **Important:** On the very first installer screen, check **"Add python.exe to PATH"** before clicking *Install Now*.
 2. **Ollama (for local AI photo descriptions)**:
    * Download and install **Ollama for Windows** from [ollama.com/download/windows](https://ollama.com/download/windows).
-   * After launching **Memory Setup**, you can click **Start Ollama** and **Pull Moondream** directly inside the GUI (no commands needed!).
-3. *(Optional)* **Microsoft Visual C++ Redistributable**:
-   * Only needed on some fresh Windows PCs if you enable Face Recognition (`Install Face AI` button in GUI).
+   * After opening **Memory Setup**, click **Start Ollama** and **Pull Moondream** right inside the app (no commands needed!).
+3. **Optional System Components**:
+   * **Microsoft Edge WebView2 Runtime**: Pre-installed on Windows 11 and most Windows 10 systems for the native app window (automatically falls back to your default browser if missing).
+   * **Microsoft Visual C++ Redistributable**: Only needed on fresh Windows PCs if you enable Face Recognition (`Install Face AI` button in the GUI).
+   * **ExifTool** *(optional)*: Install if you want deep video/RAW camera tag parsing (falls back cleanly to Pillow EXIF).
 
-#### 2. Download & Launch (Zero Terminal Commands)
-1. Click **Code -> Download ZIP** on GitHub -> right-click the `.zip` -> **Extract All...** (or `git clone https://github.com/Nikunj-Gupta-1/memory-setup.git`).
+#### 2. Download, First-Time Setup & Silent Shortcut
+1. Click **Code -> Download ZIP** on GitHub -> right-click the `.zip` -> **Extract All...** (or run `git clone https://github.com/Nikunj-Gupta-1/memory-setup.git`).
 2. Open the extracted folder and double-click **`Start_Memory_Setup.bat`**.
    * *If Windows Defender SmartScreen appears*: click **More info -> Run anyway**.
-   * On first launch, it creates `.venv`, installs dependencies (`pillow-heif` for iPhone `.heic` photos + `pywebview` GUI), generates a silent **`Memory Setup.lnk`** shortcut with custom icon, and launches the Control Center via `pythonw.exe` without keeping a console window open.
-
-#### 3. Complete Workflow Inside the GUI
-1. **Setup Wizard Cards**:
-   * Click **Start Ollama** and **Pull Moondream** (`~1.7 GB` download) to enable offline AI photo descriptions.
-   * Click **Install Face AI** *(optional)* to install InsightFace ArcFace `buffalo_l` facial clustering right from the browser.
-2. **Choose Folders & Mode**:
-   * For **Safe First Test** (recommended with 20–50 sample photos): click **Safe Copy (Keep Originals)** -> pick an empty destination via **Browse Archive...** (e.g. `Desktop\TestMuseum`) and pick your sample folder via **Browse Source...** (`Desktop\TestPhotos`). Your original files are never touched.
-   * Click **Audit Folder** to check free disk space (`>= 15.0 GiB` safety floor) and verify dependencies.
-3. **Run & Browse**:
-   * Choose **Whisper** (lowest RAM / coolest) or **Turbo**, then click **Organize & Build Museum**.
-   * Use **Pause & Flush RAM** anytime to stop safely and resume later with **Resume Vision AI Only**.
-   * Click **Quarantine Docs** to move flagged homework/notes into `content/documents/homework_archive/`, or click **Open Offline Museum Viewer** to explore timeline, world map, people clusters (rename/merge live), and full-text search.
+   * On first launch, it creates `.venv`, installs dependencies (`pillow-heif` for iPhone `.heic` photos + `pywebview` GUI), generates a silent **`Memory Setup.lnk`** shortcut with custom logo icon, and launches the Control Center via `pythonw.exe` without keeping a console window open.
+3. **Every launch after first setup:** Double-click **`Memory Setup.lnk`** (opens with custom icon and zero console flash — you can pin it to your Desktop or Taskbar while keeping this folder in place) or re-run `Start_Memory_Setup.bat`.
 
 ---
 
-### Option B: macOS Quick Start
+### Option B: macOS (Apple Silicon / Intel, macOS 12.0+) Step-by-Step Guide
 
-1. **Prerequisites**: Python 3.10+ (`python3 --version`) and [Ollama](https://ollama.com).
-2. **Launch Control Center**:
-   * Double-click **`Memory Setup.app`** (or `Start_Memory_Setup.command` on first setup; run `xattr -cr .` first if downloaded as a ZIP).
-   * After `.venv` is ready, `Memory Setup.app` launches directly with **no Terminal window**, custom app icon, and `"Memory Setup"` in the Dock/menu bar (`Start_Memory_Setup.command` also detaches and closes its Terminal window).
-   * Use **Start Ollama**, **Pull Moondream**, **Install Face AI**, **Browse Archive / Browse Source**, and **Open Offline Museum Viewer** directly in the UI.
+#### 1. One-Time Prerequisites on macOS
+1. **Python 3.10+** (`python3 --version`; Python `3.12` or `uv` recommended) and [Ollama for macOS](https://ollama.com).
+2. *(Optional)* **`exiftool`** (`brew install exiftool`) for extended video/RAW metadata (`sips` + `pillow-heif` handle HEIC photos automatically).
+
+#### 2. Download, First-Time Setup & Zero-Terminal Launch
+1. Download via `git clone https://github.com/Nikunj-Gupta-1/memory-setup.git`, or **Code -> Download ZIP** and unzip in Finder.
+2. **If you downloaded the GitHub `.zip`** (macOS adds quarantine flags and `.zip` archives strip executable bits), open Terminal in the extracted folder once and run:
+   ```bash
+   xattr -cr .
+   chmod +x Start_Memory_Setup.command "Memory Setup.app/Contents/MacOS/MemorySetup"
+   ```
+3. **First launch:** Double-click **`Memory Setup.app`** (or **`Start_Memory_Setup.command`**).
+   * If `.venv` has not been created yet, `Memory Setup.app` automatically opens `Start_Memory_Setup.command` once in Terminal to build `.venv` (using `uv` Python `3.12` if installed, else `python3 -m venv`), installs `.[heif,gui]`, detaches the Control Center, and closes its temporary Terminal window.
+4. **Every launch after first setup:** Double-click **`Memory Setup.app`** directly for a clean native window (`"Memory Setup"` in the Dock/menu bar with custom icon and **zero Terminal window**; background logs are written to `~/Library/Logs/MemorySetup.log`).
+   * Closing the window with the macOS red close icon or `Cmd+Q` signals any running stage to pause safely and exits cleanly without hanging.
+
+---
+
+### Inside the Control Center (Windows & macOS)
+1. **Setup Wizard Cards**:
+   * Click **Start Ollama** and **Pull Moondream** (`~1.7 GB` download) to enable offline AI photo descriptions.
+   * Click **Install Face AI** *(optional)* to install InsightFace ArcFace `buffalo_l` facial clustering directly inside the app.
+2. **Choose Folders & Mode**:
+   * For a **Safe First Test** (recommended with 20–50 sample photos): select **Safe Copy (Keep Originals)** -> pick an empty destination via **Browse Archive...** (e.g. `Desktop/TestMuseum`) and pick your sample folder via **Browse Source...** (`Desktop/TestPhotos`). Your original files remain untouched.
+   * Click **Audit Folder** to check free disk space (`>= 15.0 GiB` safety floor) and verify local tools.
+3. **Run & Browse**:
+   * Choose **Whisper** (lowest RAM / coolest) or **Turbo**, then click **Organize & Build Museum**.
+   * Use **Pause & Flush RAM** anytime to stop cleanly and resume later with **Resume Vision AI Only**.
+   * Click **Quarantine Docs** to move flagged homework/notes into `content/documents/homework_archive/`, or click **Open Offline Museum Viewer** to explore timeline, world map, people clusters (rename/merge live), and full-text search.
 
 <details>
 <summary>Optional Headless CLI Commands (Advanced Users)</summary>
 
+Pass arguments directly to **`Start_Memory_Setup.command`** (macOS) or **`Start_Memory_Setup.bat`** (Windows), or activate `.venv` first (`source .venv/bin/activate` on macOS, `.venv\Scripts\activate` on Windows) and run `memory-setup`:
+
 ```bash
 # Pre-flight hardware, disk, tool, and Ollama diagnostics
-memory-setup --setup
+./Start_Memory_Setup.command --setup      # Windows: .\Start_Memory_Setup.bat --setup
 
 # Run full pipeline in Safe Copy or In-Place mode
 memory-setup run /path/to/NewArchive --safe-copy --source /path/to/RawPhotos --whisper
@@ -129,10 +146,18 @@ memory-setup status /path/to/MyArchive
 
 ## Running the Test Suite
 
-All tests run cleanly offline using synthetic images, mocked Ollama HTTP responses, and temporary directories (`0` personal media required):
+All tests run cleanly offline using synthetic images, mocked Ollama HTTP responses, and temporary directories (`0` personal media required). First ensure the `dev` extra (`pytest`) is installed, then run `pytest`:
 
 ```bash
+# macOS / Linux
+.venv/bin/python -m pip install -e ".[dev]"   # (or: uv pip install --python .venv/bin/python -e ".[dev]")
 .venv/bin/pytest tests -v
+```
+
+```bat
+:: Windows
+.venv\Scripts\python.exe -m pip install -e ".[dev]"
+.venv\Scripts\pytest.exe tests -v
 ```
 
 ---

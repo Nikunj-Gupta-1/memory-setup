@@ -88,7 +88,7 @@ protobuf==7.36.2             # Protocol buffer serialization
 | **Stage 4 Upgrade: ArcFace BLAS Cluster** | Apple Accelerate BLAS (512-d unit vectors) | ~490 MB | +2 MB (Avatars & ranks) | **8.92 seconds** | 67,390 vectors clustered (thresh=0.48); **Top 9 family coverage expanded from 4.9k to 24.3k faces** |
 | **Stage 4: Vision Memory Watchdog & VLM** | M2 Pro GPU via Ollama (`moondream`) | ~2.2 GB (Bounded) | +12 MB (`catalog.sqlite`) | Continuous Background | Memory-bounded 10-image runner recycling active (`num_ctx=1024`) |
 | **Stage 5: Zero-Config Streaming Server** | Python 3 `http.server` (port 8080) | ~25 MB | 0 bytes | Instant | Serves museum web application smoothly at `http://localhost:8080/viewer/viewer.html` |
-| **Standalone App (`Memory_Setup`)** | Python 3.12 (`uv` `.venv`), HTTP + SSE GUI | ~40 MB (Control Center) | <5 MB (Code + `.venv` excluded in Git) | Published (`23/23` pytest pass) | Cross-platform macOS/Windows GUI & CLI at `https://github.com/Nikunj-Gupta-1/memory-setup` |
+| **Standalone App (`Memory_Setup`)** | Python 3.12 (`uv` `.venv`), `pywebview` + HTTP/SSE GUI | ~40 MB (Control Center) | <5 MB (Code + `cities15000.sqlite` + `.app`; `.venv` gitignored) | Published (`29/29` pytest pass) | Cross-platform macOS/Windows zero-Terminal GUI & CLI at `https://github.com/Nikunj-Gupta-1/memory-setup` |
 
 ---
 
