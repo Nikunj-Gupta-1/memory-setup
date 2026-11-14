@@ -1,9 +1,9 @@
 import os
 from pathlib import Path
 
-# Workspace Root & Layout
-VIEWER_DIR = Path(__file__).resolve().parent.parent # /Users/nikunjgupta/Downloads/images/viewer
-WORKSPACE_ROOT = VIEWER_DIR.parent                  # /Users/nikunjgupta/Downloads/images
+# Workspace Root & Layout (resolved dynamically from viewer/pipeline/config.py)
+VIEWER_DIR = Path(__file__).resolve().parent.parent  # <archive_root>/viewer
+WORKSPACE_ROOT = VIEWER_DIR.parent                   # <archive_root>
 CONTENT_DIR = WORKSPACE_ROOT / 'content'
 
 # Destination Directories

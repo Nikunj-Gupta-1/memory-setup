@@ -9,19 +9,19 @@
 
 This environment operates across two distinct workspaces:
 
-1. **Active Media Archive & Museum Runtime**:  
-   Path: `/Users/nikunjgupta/Downloads/images`  
-   Contains 33,771 personal photos and videos spanning 2007–2026. Organized into a strict two-folder contract (`content/` and `viewer/`). Stage 4 Vision (`stage4_vision.py`) has captioned **8,809 / 32,424** photos (**21** flagged docs) as of November 14, 2026.
+1. **Reference Archive Layout & Museum Runtime**:  
+   Path: `<archive_root>` (locally gitignored under `Memory_Setup/archive/`)  
+   Two-folder archive contract (`content/` and `viewer/`). Stage 4 Vision (`stage4_vision.py`) runs memory-bounded Ollama (`moondream`) captioning with runner recycling.
 2. **Universal Standalone Application Repository**:  
-   Path: `/Users/nikunjgupta/Downloads/PROJECTS/Memory_Setup`  
-   **Implemented & Published**: Full GUI Control Center, CLI (`memory-setup`), 1-click Mac/Windows launchers, and `23/23` passing tests. Public GitHub repo: `https://github.com/Nikunj-Gupta-1/memory-setup`.
+   Path: `Memory_Setup/` (repo root `../../`)  
+   **Implemented & Published**: Full GUI Control Center, CLI (`memory-setup`), 1-click Mac/Windows launchers, consolidated Python 3.12 `.venv`, and `23/23` passing tests. Public GitHub repo: `https://github.com/Nikunj-Gupta-1/memory-setup`.
 
 ---
 
 ## 2. Directory Layout & Key Anchors
 
 ```
-/Users/nikunjgupta/Downloads/images/
+<archive_root>/
 ├── AGENT.md                            # This briefing document
 ├── start_viewer.command                # 1-click museum launcher symlink (run from Finder)
 ├── content/                            # PURE USER CONTENT (Do not place code here)
@@ -86,19 +86,20 @@ This environment operates across two distinct workspaces:
 
 * **Launch Museum Viewer**:
   ```bash
-  cd /Users/nikunjgupta/Downloads/images/viewer && python3 server.py
+  cd <archive_root>/viewer && ../../.venv/bin/python server.py
+  # Or from repo root: memory-setup serve <archive_root>
   # Open in browser: http://localhost:8080/viewer/viewer.html
   ```
 * **Run / Resume Background Vision Analysis**:
   ```bash
-  cd /Users/nikunjgupta/Downloads/images/viewer && python3 pipeline/stage4_vision.py
+  cd <archive_root>/viewer && ../../.venv/bin/python pipeline/stage4_vision.py
   ```
 * **Verify Pipeline Stages**:
   ```bash
-  cd /Users/nikunjgupta/Downloads/images/viewer && python3 pipeline/verify_stage.py --stage 1
+  cd <archive_root>/viewer && ../../.venv/bin/python pipeline/verify_stage.py --stage 1
   # (Stages 1 through 5 supported)
   ```
 * **Re-export Viewer Data after DB Updates**:
   ```bash
-  cd /Users/nikunjgupta/Downloads/images/viewer && python3 pipeline/export_viewer_data.py
+  cd <archive_root>/viewer && ../../.venv/bin/python pipeline/export_viewer_data.py
   ```

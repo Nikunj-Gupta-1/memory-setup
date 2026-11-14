@@ -1,6 +1,6 @@
 # Universal Autonomous Application: Comprehensive Architecture & Implementation Plan
 
-**Target Repository**: `/Users/nikunjgupta/Downloads/PROJECTS/Memory_Setup`  
+**Target Repository**: `Memory_Setup/`  
 **Current Milestone**: Architecture Definition, Technical Specifications & Planning  
 **Execution Mode**: Planning & Alignment Only (No code implementation until plan approval)  
 
@@ -8,7 +8,7 @@
 
 ## 1. Goal Description
 
-Transform the battle-tested, 5-stage media intelligence pipeline (which successfully standardized, indexed, clustered, and mapped 33,771 personal files spanning 2007–2026 in `/Users/nikunjgupta/Downloads/images`) into a **universal, zero-configuration standalone desktop application with a modern Graphical User Interface (GUI)**.
+Transform the battle-tested, 5-stage media intelligence pipeline (verified on a 33,771-file personal archive spanning 2007–2026) into a **universal, zero-configuration standalone desktop application with a modern Graphical User Interface (GUI)**.
 
 ### The Universal Contract
 Any non-technical user on **macOS or Windows** can:
@@ -277,7 +277,7 @@ flowchart TD
 ## 5. File Structure in `Memory_Setup`
 
 ```
-/Users/nikunjgupta/Downloads/PROJECTS/Memory_Setup/
+Memory_Setup/
 ├── pyproject.toml
 ├── README.md
 ├── ARCHITECTURE.md
@@ -354,8 +354,8 @@ flowchart TD
 ### Automated Tests (Lightweight & RAM-Safe)
 All unit tests run on synthetic in-memory fixtures without loading large neural models:
 ```bash
-cd /Users/nikunjgupta/Downloads/PROJECTS/Memory_Setup
-pytest tests/ -v
+cd Memory_Setup
+.venv/bin/pytest tests/ -v
 ```
 - `test_checker.py`: Verifies Ollama connectivity mock and missing-tool diagnostics.
 - `test_sniffer.py`: Verifies magic-byte detection across corrupt file headers.

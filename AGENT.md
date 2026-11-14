@@ -1,14 +1,15 @@
 # AGENT.MD: Universal Standalone Application Engineering Briefing
 
 > **CRITICAL DIRECTIVE FOR ANY AGENT WORKING ON MEMORY_SETUP**:  
-> Read this file, along with `standalone_app_implementation_plan.md` in the brain artifacts directory, before writing code or modifying this repository.
+> Read this file, along with [`standalone_app_implementation_plan.md`](standalone_app_implementation_plan.md), before writing code or modifying this repository.
 
 ---
 
 ## 1. Current Status & Architecture
 
-* **Standalone App (`memory_setup/`)**: **Implemented & Verified** (`23/23` offline pytest checks passing).
-* **Public Repository**: `https://github.com/Nikunj-Gupta-1/memory-setup` (includes both `memory_setup/` standalone package and `reference_pipeline/` archive scripts/ledgers with zero personal data).
+* **Standalone App (`memory_setup/`)**: **Implemented & Verified** (`23/23` pytest checks passing).
+* **Public Repository**: `https://github.com/Nikunj-Gupta-1/memory-setup` (includes `memory_setup/` standalone package, `reference_pipeline/` scripts/ledgers with zero personal data, and `tests/`).
+* **Local Personal Archive (Gitignored)**: Any live archive operated alongside this repository lives under gitignored `archive/` (`archive/content/` + `archive/viewer/`) using the unified Python 3.12 `.venv` at the repository root. **Never** stage, commit, or push anything inside `archive/`, `content/`, `*.sqlite*`, `.processing_cache/`, `avatars/`, `catalog_data.js`, `catalog.json`, `ai_manifest.*`, or `viewer/content` symlinks.
 * **1-Click Launchers**: `Start_Memory_Setup.command` (macOS) and `Start_Memory_Setup.bat` (Windows).
 
 The user contract:
@@ -24,23 +25,22 @@ The user contract:
 
 ## 2. Reference Implementation
 
-All production logic, schemas, and algorithms are battle-tested and operational in:
-`/Users/nikunjgupta/Downloads/images/viewer/pipeline/`
+The original 5-stage pipeline schemas and scripts are preserved in `reference_pipeline/viewer/pipeline/` (alongside the live-API viewer template in `memory_setup/viewer/template/`):
 
 Key reference files to consult:
-* [`config.py`](file:///Users/nikunjgupta/Downloads/images/viewer/pipeline/config.py): Master paths & DB configuration
-* [`db.py`](file:///Users/nikunjgupta/Downloads/images/viewer/pipeline/db.py): SQLite schema, tables, indices, and transactions
-* [`geocoder.py`](file:///Users/nikunjgupta/Downloads/images/viewer/pipeline/geocoder.py): Bundled offline KD-Tree reverse geocoder (15k world cities)
-* [`stage1_consolidate.py`](file:///Users/nikunjgupta/Downloads/images/viewer/pipeline/stage1_consolidate.py): Atomic ingestion, file grouping, companion linkage
-* [`stage2_standardize.py`](file:///Users/nikunjgupta/Downloads/images/viewer/pipeline/stage2_standardize.py): Fast EXIF & proxy generation
-* [`stage3_validate.py`](file:///Users/nikunjgupta/Downloads/images/viewer/pipeline/stage3_validate.py): Validation, dHash, and deterministic AI manifest
-* [`stage4_insightface.py`](file:///Users/nikunjgupta/Downloads/images/viewer/pipeline/stage4_insightface.py): ArcFace ResNet-50 biometric face extraction
-* [`stage4_clustering.py`](file:///Users/nikunjgupta/Downloads/images/viewer/pipeline/stage4_clustering.py): Vector-accelerated NumPy BLAS Leader Centroid clustering (thresh=0.48)
-* [`stage4_vision.py`](file:///Users/nikunjgupta/Downloads/images/viewer/pipeline/stage4_vision.py): Memory-bounded Ollama Moondream vision processor with periodic recycling
-* [`stage5_museum.py`](file:///Users/nikunjgupta/Downloads/images/viewer/pipeline/stage5_museum.py): FTS5 search indexing & museum export
-* [`export_viewer_data.py`](file:///Users/nikunjgupta/Downloads/images/viewer/pipeline/export_viewer_data.py): Generates `catalog_data.js` and `catalog.json`
-* [`server.py`](file:///Users/nikunjgupta/Downloads/images/viewer/server.py): Zero-dependency local streaming HTTP server
-* [`viewer.html`](file:///Users/nikunjgupta/Downloads/images/viewer/viewer.html): Master museum UI
+* [`config.py`](reference_pipeline/viewer/pipeline/config.py): Master paths & DB configuration
+* [`db.py`](reference_pipeline/viewer/pipeline/db.py): SQLite schema, tables, indices, and transactions
+* [`geocoder.py`](reference_pipeline/viewer/pipeline/geocoder.py): Bundled offline KD-Tree reverse geocoder (15k world cities)
+* [`stage1_consolidate.py`](reference_pipeline/viewer/pipeline/stage1_consolidate.py): Atomic ingestion, file grouping, companion linkage
+* [`stage2_standardize.py`](reference_pipeline/viewer/pipeline/stage2_standardize.py): Fast EXIF & proxy generation
+* [`stage3_validate.py`](reference_pipeline/viewer/pipeline/stage3_validate.py): Validation, dHash, and deterministic AI manifest
+* [`stage4_insightface.py`](reference_pipeline/viewer/pipeline/stage4_insightface.py): ArcFace ResNet-50 biometric face extraction
+* [`stage4_clustering.py`](reference_pipeline/viewer/pipeline/stage4_clustering.py): Vector-accelerated NumPy BLAS Leader Centroid clustering (thresh=0.48)
+* [`stage4_vision.py`](reference_pipeline/viewer/pipeline/stage4_vision.py): Memory-bounded Ollama Moondream vision processor with periodic recycling
+* [`stage5_museum.py`](reference_pipeline/viewer/pipeline/stage5_museum.py): FTS5 search indexing & museum export
+* [`export_viewer_data.py`](reference_pipeline/viewer/pipeline/export_viewer_data.py): Generates `catalog_data.js` and `catalog.json`
+* [`server.py`](memory_setup/viewer/template/server.py): Zero-dependency local streaming HTTP server + live rename/merge/quarantine API
+* [`viewer.html`](reference_pipeline/viewer/viewer.html): Master museum UI
 
 ---
 

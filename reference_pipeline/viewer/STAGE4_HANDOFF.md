@@ -1,7 +1,7 @@
 # Local Media-Processing Pipeline: Stage 4 & 5 Handoff Guide
 
-**Workspace Root**: `/Users/nikunjgupta/Downloads/images`  
-**Universal Project Workspace**: `/Users/nikunjgupta/Downloads/PROJECTS/Memory_Setup`  
+**Workspace Root**: `<archive_root>` (locally placed in gitignored `Memory_Setup/archive/`)  
+**Universal Project Workspace**: `Memory_Setup/` (`https://github.com/Nikunj-Gupta-1/memory-setup`)  
 **Current Date**: November 12, 2026  
 **Environment**: Apple M2 Pro, 16 GB Unified Memory, macOS 27.2, Python 3.15.2, Ollama running locally.  
 **Available Disk Space**: 36 GiB (well above the 15.0 GiB safety limit).
@@ -11,7 +11,7 @@
 ## 1. Executive Summary & Current State
 
 Stages 1, 2, 3, Stage 4 Face Recognition & Clustering, and Stage 5 Museum Viewer are **100% completed, verified, and operational**.
-The user can immediately open and browse their entire 18-year archive in [`viewer.html`](file:///Users/nikunjgupta/Downloads/images/viewer.html).
+The user can immediately open and browse their entire 18-year archive in [`viewer.html`](viewer.html).
 
 ### Completed Milestones:
 1. **Stage 1 (Consolidation & Direct Move)**:
@@ -35,13 +35,13 @@ The user can immediately open and browse their entire 18-year archive in [`viewe
    - Pre-allocated NumPy BLAS Leader Centroid Clustering grouped all 43,119 vectors in **1.37 seconds**.
    - Discarded 3,299 stranger/tourist faces as noise (`cluster_id = -1`).
    - Isolated and ranked the **Top 9 Core Family Members** (`cluster_id = 0..8`, 450 to 736 photos each).
-   - Generated 30 avatar thumbnails in [`avatars/`](file:///Users/nikunjgupta/Downloads/images/avatars/).
+   - Generated 30 avatar thumbnails in `avatars/`.
 
 5. **Stage 5 (Search, Dual Export & Offline Museum Viewer)**:
    - Populated SQLite `ai_search_fts` virtual table (32,424 rows).
-   - Exported full hierarchical [`catalog.json`](file:///Users/nikunjgupta/Downloads/images/catalog.json) (27.75 MB).
-   - Generated compact [`catalog_data.js`](file:///Users/nikunjgupta/Downloads/images/catalog_data.js) (6.56 MB) for instant browser DOM rendering.
-   - Built single-file offline museum [`viewer.html`](file:///Users/nikunjgupta/Downloads/images/viewer.html) (26.5 KB) featuring:
+   - Exported full hierarchical `catalog.json` (27.75 MB).
+   - Generated compact `catalog_data.js` (6.56 MB) for instant browser DOM rendering.
+   - Built single-file offline museum [`viewer.html`](viewer.html) (26.5 KB) featuring:
      - 48-item virtualized lazy-loading gallery.
      - Keyless Esri ArcGIS Online World Map (Streets, Satellite, Dark Canvas, Topographic) with city pins and popups.
      - People & Faces tab with avatar cards for the 9 core family members.
@@ -54,7 +54,7 @@ The user can immediately open and browse their entire 18-year archive in [`viewe
 ## 2. Directory Layout & Architecture
 
 ```
-/Users/nikunjgupta/Downloads/images/
+<archive_root>/
 ├── images/                             # 32,424 master photos partitioned by year
 ├── videos/                             # 1,337 master videos partitioned by year
 ├── excluded/                           # Preserved non-media items (.doc files)
@@ -96,7 +96,7 @@ The user can immediately open and browse their entire 18-year archive in [`viewe
 3. **Pending Tasks**:
    * **Full Stage 4 Vision Pass (Run Overnight / Off-Hours)**:
      ```bash
-     cd /Users/nikunjgupta/Downloads/images
+     cd <archive_root>
      PYTHONPATH=. python3 pipeline/stage4_vision.py
      ```
    * **Post-Vision Re-export & Optional Cache Purge**:
@@ -106,4 +106,4 @@ The user can immediately open and browse their entire 18-year archive in [`viewe
    * **Face Recognition Quality Upgrade**:
      Implement InsightFace / ArcFace with 5-point facial landmark alignment, or add an interactive "Merge Clusters" button in `viewer.html` to consolidate childhood vs. adulthood sub-clusters.
    * **Universal Autonomous Pipeline (`Memory_Setup`)**:
-     Build the mass-producible CLI tool in `/Users/nikunjgupta/Downloads/PROJECTS/Memory_Setup` per `implementation_plan.md`.
+     Build the mass-producible CLI tool in `Memory_Setup/` per `standalone_app_implementation_plan.md`.

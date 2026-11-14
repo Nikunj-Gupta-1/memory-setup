@@ -1,8 +1,8 @@
 # The Media Intelligence Engine & Offline Museum: Project Manifesto
 
 **Date**: November 12, 2026  
-**Primary Archive**: `/Users/nikunjgupta/Downloads/images` (33,771 personal photos and videos spanning 2007–2026)  
-**Standalone Package Repo**: `/Users/nikunjgupta/Downloads/PROJECTS/Memory_Setup`  
+**Local Archive Layout**: Strict two-folder contract (`content/` + `viewer/`, locally placed in gitignored `Memory_Setup/archive/`)  
+**Standalone Package Repo**: `Memory_Setup/` (`https://github.com/Nikunj-Gupta-1/memory-setup`)  
 **Host Platform**: Apple MacBook Pro 14" (Apple M2 Pro 10c/16g/16ane, 16 GB Unified Memory, APFS SSD, macOS 27.2)  
 
 ---
@@ -16,7 +16,7 @@ This project originated with a massive, chaotic collection of **33,771 personal 
    * **`content/`**: Pure master user media (`images/YYYY/`, `videos/YYYY/`, and `documents/`).
    * **`viewer/`**: Complete self-contained museum web application runtime (`viewer.html`, `catalog.sqlite`, face avatars, proxies, and streaming server).
 3. **Local-First Intelligence**: Detect faces, extract 5-point landmark biometrics, cluster core family members across aging drift (childhood to adulthood), geocode coordinates to real-world cities offline, describe scenes using local Vision-Language Models (VLM), and flag homework/study documents for cleanup—all at **zero cloud API cost** and with **zero privacy leakage**.
-4. **Universal Standalone Application**: Package this engine into an autonomous, zero-config desktop application in `/Users/nikunjgupta/Downloads/PROJECTS/Memory_Setup` featuring an interactive setup wizard, multiple execution modes (In-Place Reorganization vs Safe Copy), and memory-bounded stability.
+4. **Universal Standalone Application**: Package this engine into an autonomous, zero-config desktop application (`memory_setup/`) featuring an interactive setup wizard, multiple execution modes (In-Place Reorganization vs Safe Copy), and memory-bounded stability.
 
 ---
 
@@ -24,36 +24,36 @@ This project originated with a massive, chaotic collection of **33,771 personal 
 
 ### Milestone 1: Stage 1 Consolidation & Companion Linking
 * **Challenge**: 33,771 items scattered across deeply nested subfolders, with Apple Live Photos (`.mov`), `.aae` sidecars, and mixed naming schemes.
-* **Resolution**: Implemented [`pipeline/stage1_consolidate.py`](file:///Users/nikunjgupta/Downloads/images/viewer/pipeline/stage1_consolidate.py). Used APFS atomic pointer re-parenting (`os.rename`) to partition files into `images/YYYY/` and `videos/YYYY/` in **6.8 minutes** with **0 bytes of extra disk consumed**.
+* **Resolution**: Implemented [`pipeline/stage1_consolidate.py`](pipeline/stage1_consolidate.py). Used APFS atomic pointer re-parenting (`os.rename`) to partition files into `images/YYYY/` and `videos/YYYY/` in **6.8 minutes** with **0 bytes of extra disk consumed**.
 * **Companion Pairing**: Grouped 39 pairs (78 files) of Apple Live Photos and sidecars under unique `companion_group_id`s in `catalog.sqlite`.
 
 ### Milestone 2: Stage 2 Metadata, Offline Geocoding & Proxy Generation
 * **Challenge**: Extract EXIF/QuickTime timestamps and reverse-geocode coordinates without network API keys. Furthermore, macOS web browsers cannot decode `.heic` images directly.
 * **Resolution**:
-  * Implemented [`pipeline/stage2_standardize.py`](file:///Users/nikunjgupta/Downloads/images/viewer/pipeline/stage2_standardize.py) with an offline KD-Tree spatial index ([`pipeline/geocoder.py`](file:///Users/nikunjgupta/Downloads/images/viewer/pipeline/geocoder.py)) containing 15,000 world cities. Reverse-geocoded 20,608 photos (63.6%) across 35 major world destinations in 4.2 minutes (0.05ms/photo).
-  * Resolved the "Sandbox Black Frame" bug by deploying multi-threaded `sips` in [`pipeline/refresh_proxies.py`](file:///Users/nikunjgupta/Downloads/images/viewer/pipeline/refresh_proxies.py), generating 14,679 proxy color JPEGs in `.processing_cache/` (841 MB) at 15.6 img/s.
+  * Implemented [`pipeline/stage2_standardize.py`](pipeline/stage2_standardize.py) with an offline KD-Tree spatial index ([`pipeline/geocoder.py`](pipeline/geocoder.py)) containing 15,000 world cities. Reverse-geocoded 20,608 photos (63.6%) across 35 major world destinations in 4.2 minutes (0.05ms/photo).
+  * Resolved the "Sandbox Black Frame" bug by deploying multi-threaded `sips` in [`pipeline/refresh_proxies.py`](pipeline/refresh_proxies.py), generating 14,679 proxy color JPEGs in `.processing_cache/` (841 MB) at 15.6 img/s.
 
 ### Milestone 3: Stage 3 Media Validation & Deterministic AI Manifest
 * **Challenge**: Guarantee byte-level media integrity, compute perceptual hashes (dHash) to resolve undated photos, and export a canonical manifest.
-* **Resolution**: Implemented [`pipeline/stage3_validate.py`](file:///Users/nikunjgupta/Downloads/images/viewer/pipeline/stage3_validate.py). Validated 32,424 master photos and generated [`ai_manifest.json`](file:///Users/nikunjgupta/Downloads/images/viewer/ai_manifest.json) (26.8 MB) and `ai_manifest.csv` (10.2 MB).
+* **Resolution**: Implemented [`pipeline/stage3_validate.py`](pipeline/stage3_validate.py). Validated 32,424 master photos and generated `ai_manifest.json` (26.8 MB) and `ai_manifest.csv` (10.2 MB).
 
 ### Milestone 4A: Apple Neural Engine Face Scanning & Fast BLAS Clustering
 * **Challenge**: Traditional Python face detection models were too slow for 32,000 photos, and naive DBSCAN clustering stalled for >25 minutes.
 * **Resolution**:
-  * Built a native Swift CLI binary ([`face_extractor.swift`](file:///Users/nikunjgupta/Downloads/images/viewer/pipeline/face_extractor.swift)) utilizing Apple Vision on the 16-core Apple Neural Engine (ANE). Scanned all 32,424 images in **5.2 minutes (103.6 img/s)**, detecting 43,119 faces.
-  * Replaced scalar queue clustering with vectorized Leader Centroid Clustering in [`pipeline/stage4_clustering.py`](file:///Users/nikunjgupta/Downloads/images/viewer/pipeline/stage4_clustering.py) via NumPy / Apple Accelerate BLAS matrix multiplication (`chunk @ centroids.T`). Clustered all 43,119 vectors in **1.37 seconds (31,473 vectors/s)**, isolating the Top 9 core family members.
+  * Built a native Swift CLI binary ([`face_extractor.swift`](pipeline/face_extractor.swift)) utilizing Apple Vision on the 16-core Apple Neural Engine (ANE). Scanned all 32,424 images in **5.2 minutes (103.6 img/s)**, detecting 43,119 faces.
+  * Replaced scalar queue clustering with vectorized Leader Centroid Clustering in [`pipeline/stage4_clustering.py`](pipeline/stage4_clustering.py) via NumPy / Apple Accelerate BLAS matrix multiplication (`chunk @ centroids.T`). Clustered all 43,119 vectors in **1.37 seconds (31,473 vectors/s)**, isolating the Top 9 core family members.
 
 ### Milestone 4 Upgrade: ArcFace ResNet-50 5-Point Landmark Calibration
 * **Challenge**: Apple Vision embeddings lack facial alignment, splitting childhood photos from adulthood photos of the same individual.
 * **Resolution**:
-  * Upgraded face pipeline to **InsightFace / ArcFace ResNet-50** (`buffalo_l`) in [`pipeline/stage4_insightface.py`](file:///Users/nikunjgupta/Downloads/images/viewer/pipeline/stage4_insightface.py) running in a dedicated Python 3.12 virtualenv (`viewer/.venv`).
-  * Implemented cross-age calibration in [`pipeline/stage4_calibrate_arcface.py`](file:///Users/nikunjgupta/Downloads/images/viewer/pipeline/stage4_calibrate_arcface.py).
+  * Upgraded face pipeline to **InsightFace / ArcFace ResNet-50** (`buffalo_l`) in [`pipeline/stage4_insightface.py`](pipeline/stage4_insightface.py) running in the consolidated Python 3.12 virtualenv (`Memory_Setup/.venv`).
+  * Implemented cross-age calibration in [`pipeline/stage4_calibrate_arcface.py`](pipeline/stage4_calibrate_arcface.py).
   * Solved SQLite Cartesian sort bottleneck (reduced candidate sampling query from 14+ minutes to 0.10s via an indexed subquery).
   * Calibrated the optimal cosine similarity threshold at **0.48–0.50**, successfully bridging childhood and adult faces without cross-family false merges. Expanded Top 9 family member coverage from 4.9k to 24.3k faces.
 
 ### Milestone 4B: High-Precision Homework & Study Document Detection
 * **Challenge**: 22 personal family photos (birthday cakes, babies, couples in front of churches) were misclassified as homework because Moondream mentioned text on clothing or cakes.
-* **Resolution**: Upgraded [`pipeline/stage4_vision.py`](file:///Users/nikunjgupta/Downloads/images/viewer/pipeline/stage4_vision.py) with a multi-layer classifier:
+* **Resolution**: Upgraded [`pipeline/stage4_vision.py`](pipeline/stage4_vision.py) with a multi-layer classifier:
   1. Strict Family Face Disqualification (`has_faces == True` $\to$ False).
   2. Narrative Subject Disqualification (person/couple/group starters $\to$ False).
   3. Event Setting Exclusions (birthday cakes, churches, parks, beaches, weddings $\to$ False).
@@ -72,7 +72,7 @@ This project originated with a massive, chaotic collection of **33,771 personal 
 * **Challenge**: Modern Chromium browsers block `file://` parent traversal (`../content/`), and pipeline scripts clobbered `viewer.html`.
 * **Resolution**:
   * Implemented anti-clobber protection in `stage5_museum.py` and dedicated export in `export_viewer_data.py`.
-  * Built [`viewer/server.py`](file:///Users/nikunjgupta/Downloads/images/viewer/server.py) and 1-click executable launcher [`start_viewer.command`](file:///Users/nikunjgupta/Downloads/images/start_viewer.command) with relative symlink `viewer/content -> ../content`.
+  * Built [`viewer/server.py`](server.py) (plus live-API template in `memory_setup/viewer/template/server.py`) and 1-click executable launcher [`start_viewer.command`](start_viewer.command) with relative symlink `viewer/content -> ../content`.
   * Museum UI features: 60fps timeline virtualized gallery, 35-city Leaflet map (Esri keyless tiles), Top 9 family member avatar manager, Lightbox metadata inspector, and Homework cleanup batch exporter.
 
 ---

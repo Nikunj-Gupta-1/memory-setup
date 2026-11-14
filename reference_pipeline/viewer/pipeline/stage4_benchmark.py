@@ -1,14 +1,24 @@
 import os
 import sys
+from pathlib import Path
+_viewer_root = Path(__file__).resolve().parent.parent
+if str(_viewer_root) not in sys.path:
+    sys.path.insert(0, str(_viewer_root))
+
 import json
 import time
 import base64
 import subprocess
 import urllib.request
-from pathlib import Path
 from typing import Dict, Any, List
 
-from pipeline.config import WORKSPACE_ROOT, DB_PATH, REPORTS_DIR
+from pipeline.config import (
+    WORKSPACE_ROOT,
+    VIEWER_DIR,
+    DB_PATH,
+    REPORTS_DIR,
+    MANIFEST_JSON_PATH,
+)
 
 DOCUMENT_KEYWORDS = [
     'notebook', 'handwriting', 'handwritten', 'math', 'maths', 'equation',
@@ -66,7 +76,9 @@ def query_moondream(img_path: str, prompt: str = "Describe this image in detail,
     }
 
 def detect_faces_native(img_path: str) -> List[Dict[str, Any]]:
-    bin_path = WORKSPACE_ROOT / 'bin_detect_faces'
+    bin_path = VIEWER_DIR / 'bin_detect_faces'
+    if not bin_path.exists():
+        bin_path = WORKSPACE_ROOT / 'bin_detect_faces'
     if not bin_path.exists():
         return []
     try:
@@ -147,7 +159,7 @@ def classify_and_tag(desc: str, item_meta: Dict[str, Any], faces: List[Dict[str,
     }
 
 def run_benchmark():
-    manifest_path = WORKSPACE_ROOT / 'ai_manifest.json'
+    manifest_path = MANIFEST_JSON_PATH if MANIFEST_JSON_PATH.exists() else (WORKSPACE_ROOT / 'ai_manifest.json')
     with open(manifest_path) as f:
         manifest = json.load(f)
     manifest_by_id = {item['id']: item for item in manifest}

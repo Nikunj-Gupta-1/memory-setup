@@ -16,7 +16,14 @@ from concurrent.futures import ThreadPoolExecutor
 from PIL import Image
 import numpy as np
 
-from pipeline.config import WORKSPACE_ROOT, DB_PATH, REPORTS_DIR
+from pipeline.config import (
+    WORKSPACE_ROOT,
+    VIEWER_DIR,
+    DB_PATH,
+    REPORTS_DIR,
+    AVATARS_DIR,
+    MANIFEST_JSON_PATH,
+)
 from pipeline.db import get_connection
 
 def dbscan_cosine(embeddings: np.ndarray, eps: float = 0.38, min_samples: int = 4) -> np.ndarray:
@@ -149,7 +156,9 @@ def extract_and_cluster_faces():
     print("STAGE 4: FACE RECOGNITION & OPEN-ENDED CLUSTERING")
     print("=" * 60)
     
-    bin_extractor = WORKSPACE_ROOT / 'bin_face_extractor'
+    bin_extractor = VIEWER_DIR / 'bin_face_extractor'
+    if not bin_extractor.exists():
+        bin_extractor = WORKSPACE_ROOT / 'bin_face_extractor'
     if not bin_extractor.exists():
         raise RuntimeError("bin_face_extractor binary not found! Please compile pipeline/face_extractor.swift.")
         
@@ -157,7 +166,7 @@ def extract_and_cluster_faces():
     cursor = conn.cursor()
     
     # 1. Load manifest items
-    manifest_path = WORKSPACE_ROOT / 'ai_manifest.json'
+    manifest_path = MANIFEST_JSON_PATH if MANIFEST_JSON_PATH.exists() else (WORKSPACE_ROOT / 'ai_manifest.json')
     with open(manifest_path) as f:
         manifest = json.load(f)
         
@@ -252,7 +261,7 @@ def extract_and_cluster_faces():
     print("✓ Updated all cluster IDs in SQLite!")
     
     # 4. Generate Avatars Directory for Viewer
-    avatars_dir = WORKSPACE_ROOT / 'avatars'
+    avatars_dir = AVATARS_DIR
     avatars_dir.mkdir(parents=True, exist_ok=True)
     print(f"\nGenerating avatar thumbnails for top clusters in {avatars_dir}...")
     

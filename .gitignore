@@ -17,8 +17,14 @@ Thumbs.db
 .vscode/
 .idea/
 
-# Private Media, Databases, Caches & Generated Outputs (Never Commit Personal Data)
+# Private Media, Personal Archive, Symlinks, Databases, Caches & Generated Outputs (Never Commit Personal Data)
+/archive/
+/viewer/
+/start_viewer.command
+/start_viewer.bat
 content/
+viewer/content
+**/viewer/content
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal

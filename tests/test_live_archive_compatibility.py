@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 import pytest
 
@@ -7,7 +8,12 @@ from memory_setup.config import ArchiveContext
 from memory_setup.pipeline_runner import get_archive_metrics
 
 
-LIVE_ARCHIVE = Path("/Users/nikunjgupta/Downloads/images")
+_ENV_ARCHIVE = os.environ.get("MEMORY_SETUP_LIVE_ARCHIVE")
+LIVE_ARCHIVE = (
+    Path(_ENV_ARCHIVE).expanduser()
+    if _ENV_ARCHIVE
+    else Path(__file__).resolve().parent.parent / "archive"
+)
 
 
 @pytest.mark.skipif(not (LIVE_ARCHIVE / "viewer" / "catalog.sqlite").exists(), reason="Live reference archive not present")
