@@ -22,6 +22,8 @@ CREATE TABLE IF NOT EXISTS media_items (
     has_unknown_date INTEGER DEFAULT 0,
     capture_timestamp TEXT,
     capture_source TEXT DEFAULT 'none',
+    matched_dated_id TEXT,
+    matched_timestamp TEXT,
     processing_status TEXT NOT NULL,
     face_scanned INTEGER DEFAULT 0,
     created_at TEXT NOT NULL,
@@ -121,6 +123,21 @@ CREATE INDEX IF NOT EXISTS idx_media_sha256 ON media_items(sha256_original);
 CREATE INDEX IF NOT EXISTS idx_op_media ON operation_history(media_id);
 CREATE INDEX IF NOT EXISTS idx_faces_media ON people_faces(media_id);
 CREATE INDEX IF NOT EXISTS idx_faces_cluster ON people_faces(cluster_id);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS ai_search_fts USING fts5(
+    media_id UNINDEXED,
+    media_type,
+    filename,
+    short_caption,
+    detailed_description,
+    tags,
+    scene_type,
+    person_names,
+    camera_model,
+    city,
+    country,
+    capture_timestamp
+);
 """
 
 
@@ -196,14 +213,67 @@ def ensure_schema_migrations(conn: sqlite3.Connection) -> None:
     cursor = conn.cursor()
     cursor.execute("PRAGMA table_info(media_items)")
     media_cols = {row[1] for row in cursor.fetchall()}
-    if media_cols and "face_scanned" not in media_cols:
-        conn.execute("ALTER TABLE media_items ADD COLUMN face_scanned INTEGER DEFAULT 0")
+    if media_cols:
+        if "face_scanned" not in media_cols:
+            conn.execute("ALTER TABLE media_items ADD COLUMN face_scanned INTEGER DEFAULT 0")
+            conn.execute(
+                "UPDATE media_items SET face_scanned = 1 "
+                "WHERE id IN (SELECT DISTINCT media_id FROM people_faces)"
+            )
+        if "matched_dated_id" not in media_cols:
+            conn.execute("ALTER TABLE media_items ADD COLUMN matched_dated_id TEXT")
+        if "matched_timestamp" not in media_cols:
+            conn.execute("ALTER TABLE media_items ADD COLUMN matched_timestamp TEXT")
+
+        # Consolidate any legacy Stage-3 `ai_manifest` match pointers into `media_items` and drop the redundant table.
+        has_legacy_manifest = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'ai_manifest'"
+        ).fetchone()
+        if has_legacy_manifest:
+            manifest_cols = {
+                row[1] for row in conn.execute("PRAGMA table_info(ai_manifest)").fetchall()
+            }
+            if {"id", "matched_dated_id", "matched_timestamp"}.issubset(manifest_cols):
+                conn.execute(
+                    """
+                    UPDATE media_items
+                    SET matched_dated_id = COALESCE(
+                            matched_dated_id,
+                            (SELECT m.matched_dated_id FROM ai_manifest m WHERE m.id = media_items.id)
+                        ),
+                        matched_timestamp = COALESCE(
+                            matched_timestamp,
+                            (SELECT m.matched_timestamp FROM ai_manifest m WHERE m.id = media_items.id)
+                        )
+                    WHERE EXISTS (
+                        SELECT 1 FROM ai_manifest m
+                        WHERE m.id = media_items.id AND m.matched_dated_id IS NOT NULL
+                    )
+                    """
+                )
+            conn.execute("DROP TABLE IF EXISTS ai_manifest")
+
         conn.execute(
-            "UPDATE media_items SET face_scanned = 1 "
-            "WHERE id IN (SELECT DISTINCT media_id FROM people_faces)"
+            """
+            UPDATE media_items
+            SET sha256_original = (
+                SELECT p.sha256_processing
+                FROM processing_inputs p
+                WHERE p.media_id = media_items.id
+                  AND p.is_reused_original = 1
+                  AND COALESCE(p.sha256_processing, '') != ''
+            )
+            WHERE sha256_original IS NULL
+              AND EXISTS (
+                SELECT 1
+                FROM processing_inputs p
+                WHERE p.media_id = media_items.id
+                  AND p.is_reused_original = 1
+                  AND COALESCE(p.sha256_processing, '') != ''
+              )
+            """
         )
 
-    if media_cols:
         db_rows = conn.execute("PRAGMA database_list").fetchall()
         for _, db_name, db_file in db_rows:
             if db_name == "main" and db_file:

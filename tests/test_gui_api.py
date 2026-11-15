@@ -117,17 +117,37 @@ def test_gui_server_endpoints_and_museum_mount(tmp_path: Path) -> None:
         except urllib.error.HTTPError as exc:
             assert exc.code == 400
 
-        # Control Center HTML/JS exposes reprocess, recluster, people manager, and quarantine
+        # Control Center HTML/JS exposes studio sidebar menu, per-stage triggers, people manager, and quarantine
         with urllib.request.urlopen(f"{base}/", timeout=5) as r:
             ctrl_html = r.read().decode("utf-8")
-            for marker in ("chkReprocess", "chkRecluster", "peopleManagerModal", "openPeopleManager", "btnQuarantineDocs"):
+            for marker in (
+                "chkReprocess",
+                "chkRecluster",
+                "peopleManagerModal",
+                "openPeopleManager",
+                "btnQuarantineDocs",
+                "switchStudioTab",
+                "runSpecificStages",
+                "btnStage1",
+                "btnStage4Faces",
+                "btnStage4Cluster",
+                "mClusters",
+            ):
                 assert marker in ctrl_html
         with urllib.request.urlopen(f"{base}/app.js", timeout=5) as r:
             ctrl_js = r.read().decode("utf-8")
-            for marker in ("reprocess", "recluster", "/api/people/clusters", "/api/people/rename", "/api/people/merge"):
+            for marker in (
+                "reprocess",
+                "recluster",
+                "/api/people/clusters",
+                "/api/people/rename",
+                "/api/people/merge",
+                "switchStudioTab",
+                "runSpecificStages",
+            ):
                 assert marker in ctrl_js
 
-        # POST /api/pipeline/start forwards reprocess & recluster toggles to PipelineManager
+        # POST /api/pipeline/start forwards reprocess, recluster & targeted stage selections
         with patch.object(server.app_state.manager, "start", return_value=True) as mock_start:
             start_res = _post_json(
                 f"{base}/api/pipeline/start",
@@ -137,6 +157,7 @@ def test_gui_server_endpoints_and_museum_mount(tmp_path: Path) -> None:
                     "force": True,
                     "reprocess": True,
                     "recluster": True,
+                    "stages": ["stage1", "stage4_cluster"],
                 },
             )
             assert start_res["started"] is True
@@ -144,6 +165,7 @@ def test_gui_server_endpoints_and_museum_mount(tmp_path: Path) -> None:
             started_ctx = mock_start.call_args[0][0]
             assert started_ctx.reprocess is True
             assert started_ctx.recluster is True
+            assert mock_start.call_args[1]["stages"] == ["stage1", "stage4_cluster"]
 
         # Live mounted museum viewer HTML (read-only)
         with urllib.request.urlopen(f"{base}/archive/viewer/viewer.html", timeout=5) as r:
@@ -265,3 +287,22 @@ def test_launch_gui_uses_ico_on_windows_and_cleans_up_sse(tmp_path: Path) -> Non
 
     assert elapsed < 2.0
     assert Path(captured["start_kwargs"]["icon"]).name == "icon.ico"
+
+
+def test_pipeline_manager_targeted_stage_runs(tmp_path: Path) -> None:
+    from memory_setup.pipeline_runner import PipelineManager
+
+    ctx = ArchiveContext(archive_root=tmp_path / "Arch", mode="in_place", enable_biometrics=False, enable_vision=False)
+    mgr = PipelineManager()
+    with (
+        patch("memory_setup.pipeline_runner.run_stage1_consolidation", return_value={"new_files": 0}) as m_s1,
+        patch("memory_setup.pipeline_runner.run_stage2_standardization") as m_s2,
+        patch("memory_setup.pipeline_runner.cluster_and_generate_avatars", return_value={"clusters": 1}) as m_clust,
+    ):
+        assert mgr.start(ctx, stages=["stage1", "stage4_cluster"])
+        assert mgr._thread is not None
+        mgr._thread.join(timeout=5.0)
+        assert mgr.state["stage"] == "complete"
+        m_s1.assert_called_once()
+        m_s2.assert_not_called()
+        m_clust.assert_called_once()

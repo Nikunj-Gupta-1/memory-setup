@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 import json
+import socketserver
 import sqlite3
+import threading
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 import numpy as np
@@ -17,6 +21,12 @@ from memory_setup.ingestion.router import (
     run_stage2_standardization,
     run_stage3_validation,
 )
+from memory_setup.viewer.builder import (
+    quarantine_homework_files,
+    rename_person_clusters,
+    run_stage5_museum,
+)
+from memory_setup.viewer.template import server as standalone_server
 
 
 def _make_jpg(path: Path, color: tuple[int, int, int]) -> None:
@@ -300,3 +310,208 @@ def test_legacy_stage4_checkpoint_backfills_zero_face_photos(tmp_path: Path) -> 
     scan_res = run_biometric_face_scan(ctx)
     assert scan_res["scanned"] == 0
     assert scan_res["already_scanned"] == 3
+
+
+def test_consolidated_single_schema_drops_ai_manifest_and_syncs_stages(tmp_path: Path) -> None:
+    arch = tmp_path / "ConsolidatedArchive"
+    arch.mkdir(parents=True, exist_ok=True)
+    # Create one dated photo and a visually identical re-saved unknown-date photo (different SHA-256, same dHash)
+    arr = np.zeros((160, 160, 3), dtype=np.uint8)
+    for x in range(160):
+        arr[:, x, 0] = int((x / 159.0) * 255)
+        arr[:, x, 1] = 120
+        arr[:, x, 2] = 255 - int((x / 159.0) * 255)
+    img = Image.fromarray(arr, mode="RGB")
+    (arch / "dated").mkdir(parents=True)
+    (arch / "unknown").mkdir(parents=True)
+    img.save(arch / "dated" / "20200501_101500.jpg", format="JPEG", quality=95)
+    img.save(arch / "unknown" / "mystery_shot.jpg", format="JPEG", quality=82)
+
+    ctx = ArchiveContext(archive_root=arch, mode="in_place")
+    run_stage1_consolidation(ctx)
+    run_stage2_standardization(ctx, max_workers=2)
+    res3 = run_stage3_validation(ctx, max_workers=2)
+    assert res3["unknown_date_matches_found"] >= 1
+
+    conn = get_connection(ctx.db_path, readonly=True)
+    # No separate Stage-3 ai_manifest table exists in SQLite
+    has_manifest_tbl = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'ai_manifest'"
+    ).fetchone()
+    assert has_manifest_tbl is None
+
+    # dHash match pointers are stored directly in unified `media_items`
+    matched_row = conn.execute(
+        "SELECT id, matched_dated_id, matched_timestamp, sha256_original FROM media_items WHERE original_filename = 'mystery_shot.jpg'"
+    ).fetchone()
+    assert matched_row is not None
+    assert matched_row[1] is not None
+    assert matched_row[2] == "2020-05-01T10:15:00"
+    assert matched_row[3] is not None
+    conn.close()
+
+    # Simulate a legacy database that still carries `ai_manifest` + NULL `sha256_original`
+    conn_legacy = get_connection(ctx.db_path)
+    dated_id = conn_legacy.execute(
+        "SELECT id FROM media_items WHERE original_filename = '20200501_101500.jpg'"
+    ).fetchone()[0]
+    unknown_id = matched_row[0]
+    conn_legacy.execute(
+        "UPDATE media_items SET matched_dated_id = NULL, matched_timestamp = NULL, sha256_original = NULL WHERE id = ?",
+        (unknown_id,),
+    )
+    conn_legacy.execute(
+        """
+        CREATE TABLE ai_manifest (
+            id TEXT PRIMARY KEY,
+            matched_dated_id TEXT,
+            matched_timestamp TEXT
+        )
+        """
+    )
+    conn_legacy.execute(
+        "INSERT INTO ai_manifest (id, matched_dated_id, matched_timestamp) VALUES (?, ?, ?)",
+        (unknown_id, dated_id, "2020-05-01T10:15:00"),
+    )
+    conn_legacy.commit()
+    conn_legacy.close()
+
+    init_db(ctx.db_path)
+    conn_migrated = get_connection(ctx.db_path, readonly=True)
+    assert conn_migrated.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'ai_manifest'"
+    ).fetchone() is None
+    restored = conn_migrated.execute(
+        "SELECT matched_dated_id, matched_timestamp, sha256_original FROM media_items WHERE id = ?",
+        (unknown_id,),
+    ).fetchone()
+    assert restored[0] == dated_id
+    assert restored[1] == "2020-05-01T10:15:00"
+    assert restored[2] is not None
+    conn_migrated.close()
+
+
+def test_cross_stage_fts5_quarantine_and_standalone_server_sync(tmp_path: Path) -> None:
+    arch = tmp_path / "SyncedMuseum"
+    raw = arch / "raw"
+    raw.mkdir(parents=True, exist_ok=True)
+    _make_jpg(raw / "portrait.jpg", (180, 120, 90))
+    _make_jpg(raw / "worksheet.jpg", (230, 230, 230))
+    (raw / "holiday_clip.avi").write_bytes(b"RIFF____AVI_CLIP_BYTES")
+
+    ctx = ArchiveContext(archive_root=arch, mode="in_place")
+    run_stage1_consolidation(ctx)
+    run_stage2_standardization(ctx, max_workers=2)
+    run_stage3_validation(ctx, max_workers=2)
+
+    conn = get_connection(ctx.db_path)
+    ids = dict(conn.execute("SELECT original_filename, id FROM media_items").fetchall())
+    conn.execute(
+        """
+        INSERT INTO ai_descriptions (
+            media_id, model_name, short_caption, detailed_description,
+            tags, scene_type, is_document_or_homework, described_at
+        ) VALUES
+            (?, 'moondream', 'Outdoor portrait.', 'Person smiling outdoors', '["portrait"]', 'people', 0, '2026-01-01'),
+            (?, 'moondream', 'Math worksheet.', 'Algebra problems on paper', '["homework"]', 'document/study', 1, '2026-01-01')
+        """,
+        (ids["portrait.jpg"], ids["worksheet.jpg"]),
+    )
+    conn.execute(
+        """
+        INSERT INTO people_faces (media_id, person_name, cluster_id, bounding_box, confidence, embedding, created_at)
+        VALUES
+            (?, NULL, 0, '[0.1,0.1,0.3,0.3]', 0.99, ?, '2026-01-01'),
+            (?, 'Bob', 1, '[0.2,0.2,0.3,0.3]', 0.98, ?, '2026-01-01')
+        """,
+        (ids["portrait.jpg"], _unit_vec(1), ids["portrait.jpg"], _unit_vec(2)),
+    )
+    conn.commit()
+    conn.close()
+
+    cstats = cluster_and_generate_avatars(ctx, recluster=False)
+    assert cstats["preserved_existing"] is True
+
+    run_stage5_museum(ctx, overwrite_html=True)
+
+    # Renaming cluster 0 -> Alice immediately syncs FTS5 + operation_history + catalog_data.js
+    rename_person_clusters(ctx, [{"cluster_id": 0, "name": "Alice"}])
+    conn_chk = get_connection(ctx.db_path, readonly=True)
+    alice_hits = conn_chk.execute(
+        "SELECT media_id FROM ai_search_fts WHERE ai_search_fts MATCH 'Alice'"
+    ).fetchall()
+    assert [r[0] for r in alice_hits] == [ids["portrait.jpg"]]
+    vid_hits = conn_chk.execute(
+        "SELECT media_id FROM ai_search_fts WHERE ai_search_fts MATCH 'holiday_clip'"
+    ).fetchall()
+    assert [r[0] for r in vid_hits] == [ids["holiday_clip.avi"]]
+    ckpt_rows = dict(conn_chk.execute("SELECT stage, success_count FROM checkpoints").fetchall())
+    assert "stage4_clustering" in ckpt_rows
+    assert "stage5_museum" in ckpt_rows
+    conn_chk.close()
+
+    # Quarantine updates current_path, current_filename, updated_at, processing_inputs, and operation_history
+    moved = quarantine_homework_files(ctx)
+    assert moved == 1
+    conn_q = get_connection(ctx.db_path, readonly=True)
+    cur_p, cur_fn, proc_p = conn_q.execute(
+        """
+        SELECT m.current_path, m.current_filename, p.processing_path
+        FROM media_items m
+        JOIN processing_inputs p ON m.id = p.media_id
+        WHERE m.id = ?
+        """,
+        (ids["worksheet.jpg"],),
+    ).fetchone()
+    assert "homework_archive/" in cur_p
+    assert cur_p.endswith("/" + cur_fn)
+    assert proc_p == cur_p
+    q_ops = conn_q.execute(
+        "SELECT COUNT(*) FROM operation_history WHERE media_id = ? AND action = 'QUARANTINE'",
+        (ids["worksheet.jpg"],),
+    ).fetchone()[0]
+    assert q_ops == 1
+    conn_q.close()
+
+    # Standalone viewer server stays in parity on merge (preserves target name & rejects self-merge)
+    socketserver.ThreadingTCPServer.allow_reuse_address = True
+    httpd = socketserver.ThreadingTCPServer(("127.0.0.1", 0), standalone_server.MuseumHandler)
+    httpd.root_dir = ctx.archive_root  # type: ignore[attr-defined]
+    httpd.db_path = ctx.db_path  # type: ignore[attr-defined]
+    port = httpd.server_address[1]
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    try:
+        base = f"http://127.0.0.1:{port}"
+        merge_req = urllib.request.Request(
+            f"{base}/api/people/merge",
+            data=json.dumps({"source_id": 1, "target_id": 0}).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(merge_req, timeout=5) as resp:
+            assert resp.status == 200
+            assert json.loads(resp.read().decode("utf-8"))["ok"] is True
+
+        conn_m = get_connection(ctx.db_path, readonly=True)
+        names = {
+            r[0]
+            for r in conn_m.execute("SELECT person_name FROM people_faces WHERE cluster_id = 0").fetchall()
+        }
+        conn_m.close()
+        assert names == {"Alice"}
+
+        bad_req = urllib.request.Request(
+            f"{base}/api/people/merge",
+            data=json.dumps({"source_id": 0, "target_id": 0}).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            urllib.request.urlopen(bad_req, timeout=5)
+            assert False, "Expected 400 for self-merge"
+        except urllib.error.HTTPError as exc:
+            assert exc.code == 400
+    finally:
+        httpd.shutdown()
+        httpd.server_close()

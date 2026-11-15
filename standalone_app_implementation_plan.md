@@ -2,7 +2,7 @@
 
 **Target Repository**: `Memory_Setup/`  
 **Current Milestone**: Implemented Architecture & Reference Design  
-**Status**: Completed & Verified (`36/36` pytest checks passing)  
+**Status**: Completed & Verified (`40/40` pytest checks passing)  
 
 ---
 
@@ -126,7 +126,7 @@ flowchart TD
   * **Immutable Application Template**: `viewer.html` is an immutable, static application bundle packaged in `memory_setup/viewer/template/viewer.html`. It is written once during archive initialization.
   * **Dynamic Data Payloads**: Stage 5 strictly regenerates **data artifacts**:
     * `catalog_data.js`: High-speed browser payload (`ALL_PHOTOS`, `MAP_LOCATIONS`, `CORE_CLUSTERS`, `EXTENDED_CLUSTERS`).
-    * `catalog.sqlite`: Rebuilds the `ai_search_fts` FTS5 virtual table.
+    * `catalog.sqlite`: Rebuilds the unified `ai_search_fts` FTS5 virtual table across photos, videos, documents, and named people.
     * `catalog.json`: Full master export.
   * **Idempotency Guarantee**: Subsequent pipeline runs (e.g. syncing newly generated AI descriptions) ONLY refresh data payloads and **never** overwrite or modify `viewer.html`.
 
@@ -183,13 +183,13 @@ flowchart TD
   - `GET /api/people/clusters`, `POST /api/people/rename`, `POST /api/people/merge`, `POST /api/homework/quarantine`, `POST /api/open-media`: Live archive curation (Control Center only) and OS playback.
 
 #### [NEW] `memory_setup/gui/static/index.html`, `style.css` & `app.js`
-- Lightweight responsive dashboard written in pure vanilla HTML, CSS, and JavaScript (no CDN or JS framework dependencies).
-- Archive & Safe Copy Source folder selectors with Audit button.
-- Segmented storage control: `[ In-Place Move ]` | `[ Safe Copy ]`.
-- Segmented speed control: `[ Whisper (Low RAM / Cool) ]` | `[ Turbo (200-item recycle) ]`.
+- Spacious Studio Control Center dashboard written in pure vanilla HTML, CSS, and JavaScript (no CDN or JS framework dependencies).
+- Left sidebar navigation menu (`switchStudioTab`) dividing workflows cleanly across **Overview & Run**, **Stage-by-Stage Runner** (dedicated controls for Stage 1 Deduplication, Stage 2 EXIF/GPS/HEIC, Stage 3 Chronological Routing & dHash, Stages 1–3 Combined, Stage 4A Face Detection, Stage 4A-Fast Saved-Embedding Re-Clustering, Stage 4B Vision AI, and Stage 5 Museum Sync), **Curation & People**, **Storage & AI Profile**, **System Readiness**, and **Show All Panels**.
+- Persistent Active Archive & Safe Copy Source folder selectors with native Finder picker & Audit button, plus live progress monitor.
+- Interactive Storage cards (`In-Place Move` vs `Safe Copy`) and AI Memory/Thermal cards (`Whisper Mode` vs `Turbo Mode`), plus clear descriptions beside every action card and toggle.
 - Incremental & rebuild toggles (`Force Reprocess Existing Media`, `Force Full Face Re-Cluster`) plus `#peopleManagerModal` (`Manage & Merge People`) and `Quarantine Docs`.
-- Live telemetry cards (including Total Items, Master Photos, Videos, Geocoded, Faces Indexed, AI Captioned, Docs Flagged) and progress controls.
-- 1-click **"Open Offline Museum Viewer"** button.
+- Live 8-card telemetry grid (`Total Media`, `Master Photos`, `Videos`, `GPS Mapped`, `Faces Detected`, `People Clusters`, `AI Captioned`, `Docs Flagged`).
+- 1-click **"Open Offline Museum Viewer"** links.
 
 ---
 
@@ -259,7 +259,7 @@ flowchart TD
 - Rebuilds `ai_search_fts` FTS5 virtual table.
 - Exports high-speed `catalog_data.js` browser payload.
 - Deploys launcher suite:
-  - `viewer/server.py`: Lightweight Python streaming server with automatic port-hunting.
+  - `viewer/server.py`: Lightweight Python HTTP `206` streaming & `/api/search` FTS5 server with automatic port-hunting, `.sqlite` static blocking, and optional `--password`/`MUSEUM_PASSWORD` + `--read-only` remote sharing gate.
   - `viewer/start_viewer.command` & `start_viewer.bat`.
   - Archive root launcher shortcut: `start_viewer.command` / `.bat`.
 
@@ -296,7 +296,7 @@ Memory_Setup/
 │   │   ├── __init__.py
 │   │   ├── app.py                # Stdlib ThreadingHTTPServer + pywebview launcher
 │   │   └── static/
-│   │       ├── index.html        # Vanilla HTML dashboard
+│   │       ├── index.html        # Studio Control Center with sidebar menu & per-stage controls
 │   │       ├── app.js            # Vanilla JS frontend & SSE listener
 │   │       └── style.css
 │   ├── ingestion/                # Component 2: Format Sniffer & Router
@@ -322,10 +322,10 @@ Memory_Setup/
 │       ├── builder.py            # FTS5 indexer, data payload exporter
 │       └── template/
 │           ├── viewer.html       # Immutable Read-Only Museum HTML with Map, Videos & People Filter
-│           ├── server.py         # Zero-dependency HTTP 206 streaming & /api/open-media server
+│           ├── server.py         # Zero-dependency HTTP 206 streaming, /api/search & optional auth server
 │           ├── start_viewer.command # macOS 1-click launcher
 │           └── start_viewer.bat  # Windows 1-click launcher
-└── tests/                        # 36 unit & integration tests (RAM-safe)
+└── tests/                        # 40 unit & integration tests (RAM-safe)
     ├── test_checker.py
     ├── test_sniffer.py
     ├── test_companions.py

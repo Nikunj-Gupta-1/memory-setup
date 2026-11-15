@@ -9,23 +9,26 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 from memory_setup.config import ArchiveContext
-from memory_setup.db import get_connection, init_db, record_checkpoint
+from memory_setup.db import get_connection, init_db, log_operation, record_checkpoint
 
 TEMPLATE_DIR = Path(__file__).resolve().parent / "template"
 
 
 def build_fts5_index(conn: sqlite3.Connection) -> int:
-    """Rebuild SQLite FTS5 virtual search table across captions, locations, cameras, and timestamps."""
+    """Rebuild SQLite FTS5 virtual search table across captions, people names, locations, cameras, and timestamps."""
     cursor = conn.cursor()
     cursor.execute("DROP TABLE IF EXISTS ai_search_fts")
     cursor.execute(
         """
         CREATE VIRTUAL TABLE ai_search_fts USING fts5(
             media_id UNINDEXED,
+            media_type,
+            filename,
             short_caption,
             detailed_description,
             tags,
             scene_type,
+            person_names,
             camera_model,
             city,
             country,
@@ -36,23 +39,32 @@ def build_fts5_index(conn: sqlite3.Connection) -> int:
     cursor.execute(
         """
         INSERT INTO ai_search_fts (
-            media_id, short_caption, detailed_description, tags, scene_type,
-            camera_model, city, country, capture_timestamp
+            media_id, media_type, filename, short_caption, detailed_description, tags,
+            scene_type, person_names, camera_model, city, country, capture_timestamp
         )
         SELECT
             m.id,
+            m.media_type,
+            COALESCE(NULLIF(m.original_filename, ''), m.current_filename, ''),
             COALESCE(a.short_caption, ''),
             COALESCE(a.detailed_description, ''),
             COALESCE(a.tags, ''),
             COALESCE(a.scene_type, ''),
+            COALESCE(pf.person_names, ''),
             COALESCE(e.model, ''),
             COALESCE(e.city, ''),
             COALESCE(e.country, ''),
-            COALESCE(m.capture_timestamp, '')
+            COALESCE(NULLIF(m.matched_timestamp, ''), m.capture_timestamp, '')
         FROM media_items m
         LEFT JOIN ai_descriptions a ON m.id = a.media_id
         LEFT JOIN metadata_exif e ON m.id = e.media_id
-        WHERE m.media_type = 'photo'
+        LEFT JOIN (
+            SELECT media_id, GROUP_CONCAT(DISTINCT person_name) AS person_names
+            FROM people_faces
+            WHERE cluster_id >= 0 AND person_name IS NOT NULL AND person_name != ''
+            GROUP BY media_id
+        ) pf ON m.id = pf.media_id
+        WHERE m.media_type IN ('photo', 'video', 'document')
         """
     )
     conn.commit()
@@ -67,6 +79,7 @@ def export_catalog_json(ctx: ArchiveContext, conn: sqlite3.Connection) -> Path:
         SELECT
             m.id, m.media_type, m.current_path, m.file_size_bytes,
             m.capture_timestamp, m.has_unknown_date, m.companion_group_id,
+            m.matched_dated_id, m.matched_timestamp,
             e.make, e.model, e.gps_latitude, e.gps_longitude, e.city, e.state, e.country,
             p.pixel_width, p.pixel_height, p.aspect_ratio, p.megapixels, p.format,
             a.short_caption, a.detailed_description, a.tags, a.scene_type,
@@ -90,8 +103,8 @@ def export_catalog_json(ctx: ArchiveContext, conn: sqlite3.Connection) -> Path:
     items = []
     for r in rows:
         mid = r[0]
-        tags_list = json.loads(r[21]) if r[21] else []
-        subjects_list = json.loads(r[23]) if r[23] else []
+        tags_list = json.loads(r[23]) if r[23] else []
+        subjects_list = json.loads(r[25]) if r[25] else []
         items.append(
             {
                 "id": mid,
@@ -99,25 +112,27 @@ def export_catalog_json(ctx: ArchiveContext, conn: sqlite3.Connection) -> Path:
                 "path": r[2],
                 "file_size": r[3],
                 "timestamp": r[4],
+                "matched_dated_id": r[7],
+                "matched_timestamp": r[8],
                 "has_unknown_date": bool(r[5]),
                 "companion_group": r[6],
-                "camera": f"{r[7] or ''} {r[8] or ''}".strip() or None,
-                "gps": {"lat": r[9], "lon": r[10]} if r[9] is not None and r[10] is not None else None,
-                "location": {"city": r[11], "state": r[12], "country": r[13]} if r[13] else None,
+                "camera": f"{r[9] or ''} {r[10] or ''}".strip() or None,
+                "gps": {"lat": r[11], "lon": r[12]} if r[11] is not None and r[12] is not None else None,
+                "location": {"city": r[13], "state": r[14], "country": r[15]} if r[15] else None,
                 "dimensions": {
-                    "w": r[14],
-                    "h": r[15],
-                    "aspect": r[16],
-                    "mp": r[17],
-                    "format": r[18],
+                    "w": r[16],
+                    "h": r[17],
+                    "aspect": r[18],
+                    "mp": r[19],
+                    "format": r[20],
                 },
                 "ai": {
-                    "caption": r[19] or "",
-                    "description": r[20] or "",
+                    "caption": r[21] or "",
+                    "description": r[22] or "",
                     "tags": tags_list,
-                    "scene_type": r[22] or "general",
+                    "scene_type": r[24] or "general",
                     "primary_subjects": subjects_list,
-                    "is_document_or_homework": bool(r[24]) if r[24] is not None else False,
+                    "is_document_or_homework": bool(r[26]) if r[26] is not None else False,
                 },
                 "faces": face_map.get(mid, []),
             }
@@ -320,7 +335,7 @@ def run_stage5_museum(ctx: ArchiveContext, overwrite_html: bool = False) -> Dict
     report_path = ctx.reports_dir / "stage5_report.json"
     ctx.reports_dir.mkdir(parents=True, exist_ok=True)
     report_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
-    record_checkpoint(conn, "stage5_museum", fts_count, fts_count, 0, str(report_path), summary)
+    record_checkpoint(conn, "stage5_museum", fts_count, fts_count, 0, ctx.to_rel(report_path), summary)
     conn.commit()
     conn.close()
     return summary
@@ -365,27 +380,41 @@ def list_person_clusters(ctx: ArchiveContext, limit: int = 100) -> List[Dict[str
 
 
 def rename_person_clusters(ctx: ArchiveContext, updates: List[Dict[str, Any]]) -> int:
-    """Persist custom cluster names directly to SQLite and re-export catalog_data.js."""
+    """Persist custom cluster names directly to SQLite, sync FTS5, and re-export catalog_data.js."""
+    init_db(ctx.db_path)
     conn = get_connection(ctx.db_path)
     for item in updates:
+        cid = int(item["cluster_id"])
         clean_name = str(item.get("name") or "").strip() or None
         conn.execute(
             "UPDATE people_faces SET person_name = ? WHERE cluster_id = ?",
-            (clean_name, int(item["cluster_id"])),
+            (clean_name, cid),
+        )
+        log_operation(
+            conn,
+            None,
+            "control_center_people",
+            "RENAME_PERSON",
+            None,
+            None,
+            "SUCCESS",
+            {"cluster_id": cid, "person_name": clean_name},
         )
     conn.commit()
+    build_fts5_index(conn)
     export_catalog_data_js(ctx, conn)
     conn.close()
     return len(updates)
 
 
 def merge_person_clusters(ctx: ArchiveContext, source_id: int, target_id: int) -> None:
-    """Merge source_id cluster into target_id cluster in SQLite and re-export catalog_data.js."""
+    """Merge source_id cluster into target_id cluster in SQLite, sync FTS5, and re-export catalog_data.js."""
     src_id = int(source_id)
     tgt_id = int(target_id)
     if src_id == tgt_id:
         raise ValueError("Source and target cluster IDs must differ.")
 
+    init_db(ctx.db_path)
     conn = get_connection(ctx.db_path)
     row = conn.execute(
         "SELECT MAX(person_name) FROM people_faces WHERE cluster_id = ?",
@@ -403,7 +432,18 @@ def merge_person_clusters(ctx: ArchiveContext, source_id: int, target_id: int) -
             "UPDATE people_faces SET cluster_id = ? WHERE cluster_id = ?",
             (tgt_id, src_id),
         )
+    log_operation(
+        conn,
+        None,
+        "control_center_people",
+        "MERGE_PERSON",
+        str(src_id),
+        str(tgt_id),
+        "SUCCESS",
+        {"source_id": src_id, "target_id": tgt_id, "target_name": target_name},
+    )
     conn.commit()
+    build_fts5_index(conn)
     export_catalog_data_js(ctx, conn)
     conn.close()
 
@@ -412,6 +452,7 @@ def quarantine_homework_files(ctx: ArchiveContext) -> int:
     """Move flagged homework/study documents into `content/documents/homework_archive/`."""
     archive_dir = ctx.documents_dir / "homework_archive"
     archive_dir.mkdir(parents=True, exist_ok=True)
+    init_db(ctx.db_path)
     conn = get_connection(ctx.db_path)
     rows = conn.execute(
         """
@@ -423,6 +464,7 @@ def quarantine_homework_files(ctx: ArchiveContext) -> int:
     ).fetchall()
     moved = 0
     archive_resolved = archive_dir.resolve()
+    now_iso = datetime.now(timezone.utc).isoformat()
     for mid, cur_rel in rows:
         src = ctx.resolve(cur_rel)
         if src.exists() and src.parent.resolve() != archive_resolved:
@@ -431,10 +473,22 @@ def quarantine_homework_files(ctx: ArchiveContext) -> int:
                 dst = archive_dir / f"{mid}_{src.name}"
             shutil.move(str(src), str(dst))
             new_rel = dst.relative_to(ctx.archive_root).as_posix()
-            conn.execute("UPDATE media_items SET current_path = ? WHERE id = ?", (new_rel, mid))
+            conn.execute(
+                "UPDATE media_items SET current_path = ?, current_filename = ?, updated_at = ? WHERE id = ?",
+                (new_rel, dst.name, now_iso, mid),
+            )
             conn.execute(
                 "UPDATE processing_inputs SET processing_path = ? WHERE media_id = ? AND is_reused_original = 1",
                 (new_rel, mid),
+            )
+            log_operation(
+                conn,
+                mid,
+                "control_center_quarantine",
+                "QUARANTINE",
+                cur_rel,
+                new_rel,
+                "SUCCESS",
             )
             moved += 1
     conn.commit()

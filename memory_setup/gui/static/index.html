@@ -3,151 +3,662 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Memory Setup — Local Media Intelligence Control Center</title>
+  <title>Memory Setup Studio — Local Media Intelligence Control Center</title>
   <link rel="icon" type="image/png" href="/icon.png">
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-  <header>
-    <div class="brand">
-      <span>🧠</span>
-      <span>MEMORY SETUP</span>
-      <span class="pill">Local-First Intelligence Engine</span>
+  <header class="studio-header">
+    <div class="brand-cluster">
+      <div class="brand-mark">
+        <img src="/icon.png" alt="Memory Setup" onerror="this.style.display='none'; this.parentElement.textContent='🧠';">
+      </div>
+      <div>
+        <div class="brand-title">
+          <h1>MEMORY SETUP STUDIO</h1>
+          <span class="pill">100% Offline Local AI</span>
+        </div>
+        <div class="brand-sub">Unified Control Center &middot; Single-Schema SQLite Archival Engine</div>
+      </div>
     </div>
+
     <div class="telemetry-strip">
       <div class="tele-box">Free Disk: <strong id="teleDisk">-</strong></div>
-      <div class="tele-box">Ollama RAM: <strong id="teleRam">Idle</strong></div>
-      <div class="tele-box">Pipeline: <strong id="teleStage">Ready</strong></div>
+      <div class="tele-box">Vision RAM: <strong id="teleRam">Idle</strong></div>
+      <div class="tele-box">Engine: <strong id="teleStage">Ready</strong></div>
+      <a id="hdrOpenMuseum" class="btn btn-success btn-sm" href="/archive/viewer/viewer.html" target="_blank" title="Open the read-only Offline Museum Exhibition in a new browser tab">
+        🏛️ View Museum
+      </a>
     </div>
   </header>
 
-  <main class="container">
-    <!-- Step 1: Folder & Execution Mode -->
-    <section class="card">
-      <h2>1. Select Media Archive &amp; Processing Mode</h2>
-      <div class="row">
-        <input type="text" id="archivePath" class="input-text" placeholder="Destination Archive Folder (e.g. C:\Users\You\Pictures\MyMuseum)">
-        <button class="btn btn-secondary" onclick="browseFolder('archive')">📁 Browse Archive...</button>
-        <button class="btn btn-secondary" onclick="runPreflight()">🔍 Audit Folder</button>
+  <div class="studio-shell">
+    <!-- Left Navigation Sidebar Menu -->
+    <aside class="studio-sidebar" aria-label="Control Center Menu">
+      <div class="nav-list-wrap">
+        <div class="nav-group">
+          <div class="nav-group-label">Workspace</div>
+          <button id="nav-overview" class="nav-item active" type="button" onclick="switchStudioTab('overview')">
+            <span class="nav-icon">🏠</span>
+            <span class="nav-text">
+              <span class="nav-title">Overview &amp; Run</span>
+              <span class="nav-desc">Archive stats &amp; master controls</span>
+            </span>
+          </button>
+          <button id="nav-stages" class="nav-item" type="button" onclick="switchStudioTab('stages')">
+            <span class="nav-icon">⚡</span>
+            <span class="nav-text">
+              <span class="nav-title">Stage-by-Stage Runner</span>
+              <span class="nav-desc">Deduplicate, EXIF, Faces, AI, Sync</span>
+            </span>
+          </button>
+          <button id="nav-curation" class="nav-item" type="button" onclick="switchStudioTab('curation')">
+            <span class="nav-icon">🎨</span>
+            <span class="nav-text">
+              <span class="nav-title">Curation &amp; People</span>
+              <span class="nav-desc">Rename faces, merge, quarantine</span>
+            </span>
+          </button>
+        </div>
+
+        <div class="nav-group">
+          <div class="nav-group-label">Settings &amp; Health</div>
+          <button id="nav-config" class="nav-item" type="button" onclick="switchStudioTab('config')">
+            <span class="nav-icon">⚙️</span>
+            <span class="nav-text">
+              <span class="nav-title">Storage &amp; AI Profile</span>
+              <span class="nav-desc">Copy vs Move, Whisper, rebuild flags</span>
+            </span>
+          </button>
+          <button id="nav-health" class="nav-item" type="button" onclick="switchStudioTab('health')">
+            <span class="nav-icon">🩺</span>
+            <span class="nav-text">
+              <span class="nav-title">System Readiness</span>
+              <span class="nav-desc">Disk, Ollama, ArcFace &amp; EXIF</span>
+            </span>
+          </button>
+        </div>
+
+        <div class="nav-group">
+          <div class="nav-group-label">Layout</div>
+          <button id="nav-all" class="nav-item" type="button" onclick="switchStudioTab('all')">
+            <span class="nav-icon">📋</span>
+            <span class="nav-text">
+              <span class="nav-title">Show All Panels</span>
+              <span class="nav-desc">Scroll everything on one view</span>
+            </span>
+          </button>
+        </div>
       </div>
 
-      <div id="safeCopySourceRow" class="row" style="display: none; margin-top: 10px;">
-        <input type="text" id="sourcePath" class="input-text" placeholder="Source Photos Folder to Copy From (Originals Untouched)">
-        <button class="btn btn-secondary" onclick="browseFolder('source')">📂 Browse Source...</button>
+      <div class="sidebar-footer-card">
+        <div class="sidebar-footer-title">Consolidated SQLite Sync</div>
+        <div class="sidebar-footer-sub">
+          Every stage, rename, merge, and quarantine edits <code>viewer/catalog.sqlite</code> and <code>ai_search_fts</code> directly so all tabs stay in lockstep.
+        </div>
       </div>
+    </aside>
 
-      <div class="options-grid">
-        <div class="option-group">
-          <label class="title">Storage Mode</label>
-          <div class="segmented">
-            <button id="modeInPlace" class="seg-btn active" onclick="setMode('in_place')">In-Place Move (0 GB Extra)</button>
-            <button id="modeSafeCopy" class="seg-btn" onclick="setMode('safe_copy')">Safe Copy (Keep Originals)</button>
+    <!-- Main Studio Canvas -->
+    <main class="studio-main">
+      <!-- Persistent Active Archive & Live Execution Strip -->
+      <section class="chrome-bar">
+        <div class="archive-bar-head">
+          <span class="archive-bar-label">Active Media Archive Folder</span>
+          <span class="archive-bar-help">Select your archive once — all pipeline stages and curation tools operate on this folder.</span>
+        </div>
+
+        <div class="row">
+          <input type="text" id="archivePath" class="input-text" placeholder="Destination Archive Folder (e.g. /Users/you/Pictures/MemoryArchive)">
+          <button class="btn btn-secondary" type="button" onclick="browseFolder('archive')" title="Open native Finder folder dialog to pick your archive folder">
+            📁 Browse Archive...
+          </button>
+          <button class="btn btn-secondary" type="button" onclick="runPreflight()" title="Read archive SQLite metrics and check Ollama/ArcFace/Disk readiness without changing any files">
+            🔍 Audit Folder
+          </button>
+        </div>
+        <div class="source-helper">
+          <strong>Browse Archive:</strong> Picks your destination folder in Finder. &nbsp;&bull;&nbsp;
+          <strong>Audit Folder:</strong> Safely reads existing SQLite counts and checks local AI dependencies without starting a scan.
+        </div>
+
+        <div id="safeCopySourceRow" class="row" style="display: none; margin-top: 4px;">
+          <input type="text" id="sourcePath" class="input-text" placeholder="Source Photos Folder to Copy From (comma-separated allowed; originals stay untouched)">
+          <button class="btn btn-secondary" type="button" onclick="browseFolder('source')">📂 Browse Source...</button>
+          <div class="source-helper">
+            <strong>Safe Copy Source:</strong> Files are copied cleanly into your Destination Archive while originals here stay 100% untouched.
           </div>
         </div>
 
-        <div class="option-group">
-          <label class="title">AI Memory &amp; Speed Mode</label>
-          <div class="segmented">
-            <button id="speedWhisper" class="seg-btn active" onclick="setSpeed('whisper')">Whisper (Cool / 50-item recycle)</button>
-            <button id="speedTurbo" class="seg-btn" onclick="setSpeed('turbo')">Turbo (200-item recycle)</button>
+        <div class="progress-wrap">
+          <div class="status-line">
+            <strong id="progressMsg">Ready — incremental mode preserves existing AI captions &amp; face clusters when adding new media.</strong>
+            <span id="progressCounts">0 / 0</span>
+          </div>
+          <div class="progress-bar-bg">
+            <div id="progressFill" class="progress-bar-fill"></div>
+          </div>
+          <div class="status-line">
+            <span id="progressStage">Stage: idle</span>
+            <span id="progressRate"></span>
           </div>
         </div>
-      </div>
+      </section>
 
-      <div class="checks-row">
-        <label><input type="checkbox" id="chkBiometrics" checked> Enable Face Recognition &amp; Family Clustering (ArcFace 512-d)</label>
-        <label><input type="checkbox" id="chkVision" checked> Enable Local Vision AI Captions &amp; Homework Detection (Moondream)</label>
-      </div>
-
-      <div class="advanced-box">
-        <div class="advanced-head">
-          <span class="title">Incremental &amp; Rebuild Options</span>
-          <span class="hint">Leave unchecked for safe incremental updates that preserve existing AI captions &amp; people names.</span>
-        </div>
-        <div class="checks-row" style="margin-top: 8px;">
-          <label title="Re-run EXIF extraction, web proxy generation, image validation, and face detection across all media items (existing AI captions stay preserved).">
-            <input type="checkbox" id="chkReprocess">
-            <span>Force Reprocess Existing Media <small class="muted-inline">(EXIF, proxies, validation &amp; face scan)</small></span>
-          </label>
-          <label title="Re-cluster all face embeddings from scratch and regenerate avatar crops.">
-            <input type="checkbox" id="chkRecluster" onchange="toggleReclusterWarning()">
-            <span>Force Full Face Re-Cluster <small class="muted-inline">(rebuilds all cluster IDs &amp; avatars)</small></span>
-          </label>
-        </div>
-        <div id="reclusterWarn" class="warn-banner" style="display: none;">
-          Force Full Face Re-Cluster reassigns all cluster IDs and overwrites avatar thumbnails; custom people names and merges will need to be re-verified afterward.
-        </div>
-      </div>
-    </section>
-
-    <!-- Step 2: Setup Wizard & Pre-Flight Diagnostics -->
-    <section class="card">
-      <h2>2. Environment &amp; Dependency Setup Wizard</h2>
-      <div class="diag-grid" id="diagGrid">
-        <div class="diag-item">
-          <div class="diag-head"><span>Disk Safety Floor</span><span id="diagDiskBadge" class="badge-warn">Pending</span></div>
-          <div class="diag-sub" id="diagDiskSub">Select an archive folder to verify &ge;15.0 GiB free space.</div>
-        </div>
-        <div class="diag-item">
-          <div class="diag-head"><span>Local VLM (Ollama)</span><span id="diagOllamaBadge" class="badge-warn">Checking...</span></div>
-          <div class="diag-sub" id="diagOllamaSub">Checking http://127.0.0.1:11434</div>
-          <div class="row">
-            <button class="btn btn-secondary" style="padding: 5px 10px; font-size: 0.78rem;" onclick="startOllama()">Start Ollama</button>
-            <button class="btn btn-secondary" style="padding: 5px 10px; font-size: 0.78rem;" onclick="pullMoondream()">Pull Moondream</button>
+      <!-- TAB 1: OVERVIEW & MASTER CONTROLS -->
+      <section id="sec-overview" class="studio-section active" data-tab="overview">
+        <div class="card">
+          <div class="section-head">
+            <div>
+              <h2>Live Archive Telemetry</h2>
+              <p class="section-sub">Real-time counts read directly from your archive's consolidated SQLite database.</p>
+            </div>
+          </div>
+          <div class="metrics-grid">
+            <div class="metric-card">
+              <div class="val" id="mTotal">0</div>
+              <div class="lbl">Total Media</div>
+              <div class="sub">All indexed assets</div>
+            </div>
+            <div class="metric-card">
+              <div class="val" id="mPhotos">0</div>
+              <div class="lbl">Master Photos</div>
+              <div class="sub">Still photos &amp; HEICs</div>
+            </div>
+            <div class="metric-card">
+              <div class="val" id="mVideos">0</div>
+              <div class="lbl">Videos</div>
+              <div class="sub">MP4, MOV &amp; AVI clips</div>
+            </div>
+            <div class="metric-card">
+              <div class="val" id="mGeocoded">0</div>
+              <div class="lbl">GPS Mapped</div>
+              <div class="sub">Offline City &amp; Country</div>
+            </div>
+            <div class="metric-card">
+              <div class="val" id="mFaces">0</div>
+              <div class="lbl">Faces Detected</div>
+              <div class="sub">512-d ArcFace embeddings</div>
+            </div>
+            <div class="metric-card">
+              <div class="val" id="mClusters">0</div>
+              <div class="lbl">People Clusters</div>
+              <div class="sub">Grouped family identities</div>
+            </div>
+            <div class="metric-card">
+              <div class="val" id="mCaptioned">0</div>
+              <div class="lbl">AI Captioned</div>
+              <div class="sub">Moondream descriptions</div>
+            </div>
+            <div class="metric-card">
+              <div class="val" id="mHw">0</div>
+              <div class="lbl">Docs Flagged</div>
+              <div class="sub">Homework &amp; study sheets</div>
+            </div>
           </div>
         </div>
-        <div class="diag-item">
-          <div class="diag-head"><span>Biometrics (ArcFace)</span><span id="diagBioBadge" class="badge-warn">Checking...</span></div>
-          <div class="diag-sub" id="diagBioSub">Checking InsightFace &amp; ONNX providers...</div>
-          <div class="row" id="bioInstallRow">
-            <button id="btnInstallBio" class="btn btn-secondary" style="padding: 5px 10px; font-size: 0.78rem;" onclick="installBiometrics()">Install Face AI</button>
+
+        <div class="card">
+          <div class="section-head">
+            <div>
+              <h2>Master Pipeline Controls</h2>
+              <p class="section-sub">Start the complete 5-stage archival build, resume Vision AI from a checkpoint, pause safely, or open the Museum Exhibition. Want to run Deduplication or Face Detection alone? Open <strong>Stage-by-Stage Runner</strong> in the left menu.</p>
+            </div>
+          </div>
+
+          <div class="action-grid">
+            <div class="action-card action-card-primary">
+              <div>
+                <div class="action-card-top">
+                  <span class="action-card-title">Full 5-Stage Incremental Build</span>
+                  <span class="stage-tag tag-indigo">All Stages</span>
+                </div>
+                <p class="action-card-desc">
+                  Runs Discovery &amp; Deduplication, EXIF/GPS extraction, chronological folder sorting, Face Detection, local Vision AI captioning, and Museum Viewer sync. Existing AI captions and custom people names remain untouched unless rebuild flags are checked.
+                </p>
+              </div>
+              <div class="action-card-foot">
+                <button id="btnStartAll" class="btn" type="button" onclick="startPipeline()">🚀 Organize &amp; Build Museum</button>
+                <span class="action-card-hint">Safe to re-run anytime</span>
+              </div>
+            </div>
+
+            <div class="action-card">
+              <div>
+                <div class="action-card-top">
+                  <span class="action-card-title">Resume Vision AI Only</span>
+                  <span class="stage-tag tag-violet">Stage 4B + 5</span>
+                </div>
+                <p class="action-card-desc">
+                  Skips file discovery, EXIF, and face scanning completely. Picks up local Ollama Moondream photo captioning and homework detection directly from your last SQLite checkpoint and updates the Museum.
+                </p>
+              </div>
+              <div class="action-card-foot">
+                <button id="btnResumeVision" class="btn btn-violet" type="button" onclick="startVisionOnly()">🧠 Resume Vision AI Only</button>
+                <span class="action-card-hint">Fastest way to finish captions</span>
+              </div>
+            </div>
+
+            <div class="action-card">
+              <div>
+                <div class="action-card-top">
+                  <span class="action-card-title">Graceful Pause &amp; Memory Flush</span>
+                  <span class="stage-tag tag-amber">Safe Stop</span>
+                </div>
+                <p class="action-card-desc">
+                  Signals the active worker to finish the single item in flight, commit every processed row cleanly to SQLite, and unload the local AI model from Apple Silicon RAM.
+                </p>
+              </div>
+              <div class="action-card-foot">
+                <button id="btnStop" class="btn btn-warning" type="button" onclick="stopPipeline()" disabled>⏸️ Pause &amp; Flush RAM</button>
+                <span class="action-card-hint">Zero data loss on stop</span>
+              </div>
+            </div>
+
+            <div class="action-card">
+              <div>
+                <div class="action-card-top">
+                  <span class="action-card-title">Offline Museum Exhibition</span>
+                  <span class="stage-tag tag-emerald">Read-Only</span>
+                </div>
+                <p class="action-card-desc">
+                  Opens the curated photo and video museum in a new browser tab with Chronological Timeline, World Map, People Gallery, Video Cinema, Search, and Homework Review tabs.
+                </p>
+              </div>
+              <div class="action-card-foot">
+                <a id="btnOpenMuseum" class="btn btn-success" href="/archive/viewer/viewer.html" target="_blank">🏛️ Open Offline Museum Viewer</a>
+                <span class="action-card-hint">Opens viewer.html</span>
+              </div>
+            </div>
           </div>
         </div>
-        <div class="diag-item">
-          <div class="diag-head"><span>Metadata &amp; HEIC Tools</span><span id="diagToolsBadge" class="badge-warn">Checking...</span></div>
-          <div class="diag-sub" id="diagToolsSub">Checking ExifTool, sips, pillow-heif...</div>
-        </div>
-      </div>
-    </section>
+      </section>
 
-    <!-- Step 3: Archive Telemetry & Pipeline Execution -->
-    <section class="card">
-      <h2>3. Pipeline Execution &amp; Offline Museum</h2>
-      <div class="metrics-grid">
-        <div class="metric-card"><div class="val" id="mTotal">0</div><div class="lbl">Total Items</div></div>
-        <div class="metric-card"><div class="val" id="mPhotos">0</div><div class="lbl">Master Photos</div></div>
-        <div class="metric-card"><div class="val" id="mVideos">0</div><div class="lbl">Videos</div></div>
-        <div class="metric-card"><div class="val" id="mGeocoded">0</div><div class="lbl">Geocoded</div></div>
-        <div class="metric-card"><div class="val" id="mFaces">0</div><div class="lbl">Faces Indexed</div></div>
-        <div class="metric-card"><div class="val" id="mCaptioned">0</div><div class="lbl">AI Captioned</div></div>
-        <div class="metric-card"><div class="val" id="mHw">0</div><div class="lbl">Docs Flagged</div></div>
-      </div>
+      <!-- TAB 2: STAGE-BY-STAGE PIPELINE RUNNER -->
+      <section id="sec-stages" class="studio-section" data-tab="stages">
+        <div class="card">
+          <div class="section-head">
+            <div>
+              <h2>Stage-by-Stage Pipeline Runner</h2>
+              <p class="section-sub">
+                Run any individual stage cleanly on demand — such as SHA-256 deduplication alone, EXIF/GPS extraction, Face Detection, fast Face Re-Clustering, or Vision AI — without repeating stages you don't need. Every stage reads and writes directly to the unified <code>catalog.sqlite</code> database.
+              </p>
+            </div>
+          </div>
 
-      <div class="progress-wrap">
-        <div class="status-line">
-          <strong id="progressMsg">Ready — incremental mode preserves existing AI captions &amp; face clusters when adding new media.</strong>
-          <span id="progressCounts">0 / 0</span>
-        </div>
-        <div class="progress-bar-bg">
-          <div id="progressFill" class="progress-bar-fill"></div>
-        </div>
-        <div class="status-line">
-          <span id="progressStage">Stage: idle</span>
-          <span id="progressRate"></span>
-        </div>
-      </div>
+          <div class="phase-label">Phase A &mdash; Ingestion, Deduplication &amp; Folder Organization (Stages 1&ndash;3)</div>
+          <div class="action-grid">
+            <div class="action-card">
+              <div>
+                <div class="action-card-top">
+                  <span class="action-card-title">Stage 1: Discovery &amp; Deduplication</span>
+                  <span class="stage-tag tag-indigo">Stage 1</span>
+                </div>
+                <p class="action-card-desc">
+                  Scans your folder for new photos, videos, Live Photo pairs, and documents, computes exact cryptographic SHA-256 hashes, and safely quarantines byte-for-byte duplicate files into <code>duplicates/</code>.
+                </p>
+              </div>
+              <div class="action-card-foot">
+                <button id="btnStage1" class="btn btn-secondary stage-run-btn" type="button" onclick="runSpecificStages(['stage1'], 'Stage 1: Discovery &amp; SHA-256 Deduplication')">
+                  🔍 Run Deduplication &amp; Scan
+                </button>
+                <span class="action-card-hint">Quarantines exact dupes</span>
+              </div>
+            </div>
 
-      <div class="row">
-        <button id="btnStartAll" class="btn" onclick="startPipeline()">🚀 Organize &amp; Build Museum</button>
-        <button id="btnResumeVision" class="btn btn-secondary" onclick="startVisionOnly()">🧠 Resume Vision AI Only</button>
-        <button id="btnStop" class="btn btn-warning" onclick="stopPipeline()" disabled>⏸️ Pause &amp; Flush RAM</button>
-        <button class="btn btn-secondary" onclick="syncMuseum()">🔄 Refresh Museum Data</button>
-        <button id="btnManagePeople" class="btn btn-secondary" onclick="openPeopleManager()">👥 Manage &amp; Merge People</button>
-        <button id="btnQuarantineDocs" class="btn btn-secondary" onclick="quarantineHomework()">📄 Quarantine Docs</button>
-        <a id="btnOpenMuseum" class="btn btn-success" href="/archive/viewer/viewer.html" target="_blank" style="margin-left: auto;">🏛️ Open Offline Museum Viewer</a>
-      </div>
-    </section>
-  </main>
+            <div class="action-card">
+              <div>
+                <div class="action-card-top">
+                  <span class="action-card-title">Stage 2: EXIF, Offline GPS &amp; HEIC</span>
+                  <span class="stage-tag tag-indigo">Stage 2</span>
+                </div>
+                <p class="action-card-desc">
+                  Reads capture timestamps, camera/lens info, and GPS coordinates, resolves City &amp; Country names completely offline, and builds lightweight JPEGs in <code>.processing_cache/</code> for HEIC/TIFF files.
+                </p>
+              </div>
+              <div class="action-card-foot">
+                <button id="btnStage2" class="btn btn-secondary stage-run-btn" type="button" onclick="runSpecificStages(['stage2', 'stage5'], 'Stage 2: EXIF, GPS &amp; HEIC Prep')">
+                  📍 Run EXIF &amp; GPS Prep
+                </button>
+                <span class="action-card-hint">Offline GeoNames lookup</span>
+              </div>
+            </div>
+
+            <div class="action-card">
+              <div>
+                <div class="action-card-top">
+                  <span class="action-card-title">Stage 3: Chronological Folders &amp; dHash</span>
+                  <span class="stage-tag tag-indigo">Stage 3</span>
+                </div>
+                <p class="action-card-desc">
+                  Moves/copies dated assets into <code>content/YYYY/MM_Month/</code> and matches undated WhatsApp/social copies to dated originals using 64-bit perceptual dHash visual similarity.
+                </p>
+              </div>
+              <div class="action-card-foot">
+                <button id="btnStage3" class="btn btn-secondary stage-run-btn" type="button" onclick="runSpecificStages(['stage3', 'stage5'], 'Stage 3: Folder Routing &amp; Perceptual dHash')">
+                  🗂️ Run Routing &amp; dHash Match
+                </button>
+                <span class="action-card-hint">Sorts timeline folders</span>
+              </div>
+            </div>
+
+            <div class="action-card">
+              <div>
+                <div class="action-card-top">
+                  <span class="action-card-title">Stages 1&ndash;3 Combined (No AI)</span>
+                  <span class="stage-tag tag-cyan">Ingest Only</span>
+                </div>
+                <p class="action-card-desc">
+                  Runs Discovery &amp; Deduplication, EXIF/GPS Extraction, Chronological Folder Routing, and Museum Viewer Sync sequentially — ideal right after dropping new media folders when you want to add AI later.
+                </p>
+              </div>
+              <div class="action-card-foot">
+                <button id="btnStageIngestAll" class="btn btn-cyan stage-run-btn" type="button" onclick="runSpecificStages(['stage1', 'stage2', 'stage3', 'stage5'], 'Stages 1-3: Ingest, Deduplicate &amp; Organize')">
+                  📦 Run Stages 1&ndash;3 Only
+                </button>
+                <span class="action-card-hint">Zero AI compute cost</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="phase-label" style="margin-top: 22px;">Phase B &mdash; Biometric Faces, Vision AI &amp; Museum Sync (Stages 4&ndash;5)</div>
+          <div class="action-grid">
+            <div class="action-card">
+              <div>
+                <div class="action-card-top">
+                  <span class="action-card-title">Stage 4A: Face Detection &amp; Clustering</span>
+                  <span class="stage-tag tag-cyan">Stage 4A</span>
+                </div>
+                <p class="action-card-desc">
+                  Scans unscanned photos using InsightFace (<code>buffalo_l</code>) to detect faces, extract 512-d ArcFace embeddings, cluster people into family groups, and generate circular avatars in <code>viewer/avatars/</code>.
+                </p>
+              </div>
+              <div class="action-card-foot">
+                <button id="btnStage4Faces" class="btn btn-cyan stage-run-btn" type="button" onclick="runSpecificStages(['stage4_faces', 'stage5'], 'Stage 4A: Face Detection &amp; Clustering')">
+                  👤 Run Face Detection Only
+                </button>
+                <span class="action-card-hint">Skips already-scanned photos</span>
+              </div>
+            </div>
+
+            <div class="action-card">
+              <div>
+                <div class="action-card-top">
+                  <span class="action-card-title">Stage 4A-Fast: Re-Cluster Saved Faces</span>
+                  <span class="stage-tag tag-cyan">Fast Clustering</span>
+                </div>
+                <p class="action-card-desc">
+                  Re-computes cosine similarity clusters directly over the 512-d embeddings already stored in SQLite and regenerates cluster avatars in under 2 seconds without scanning image files again.
+                </p>
+              </div>
+              <div class="action-card-foot">
+                <button id="btnStage4Cluster" class="btn btn-secondary stage-run-btn" type="button" onclick="runSpecificStages(['stage4_cluster', 'stage5'], 'Stage 4A-Fast: Re-Cluster Saved Faces')">
+                  🧩 Re-Cluster Saved Faces
+                </button>
+                <span class="action-card-hint">Uses saved embeddings</span>
+              </div>
+            </div>
+
+            <div class="action-card">
+              <div>
+                <div class="action-card-top">
+                  <span class="action-card-title">Stage 4B: Vision AI &amp; Homework Scan</span>
+                  <span class="stage-tag tag-violet">Stage 4B</span>
+                </div>
+                <p class="action-card-desc">
+                  Runs local Ollama (<code>moondream</code>) over uncaptioned photos with periodic memory recycling to generate captions, search tags, scene categories, and homework/study note flags.
+                </p>
+              </div>
+              <div class="action-card-foot">
+                <button id="btnStage4Vision" class="btn btn-violet stage-run-btn" type="button" onclick="runSpecificStages(['stage4_vision', 'stage5'], 'Stage 4B: Vision AI &amp; Homework Scan')">
+                  🧠 Run Vision AI Captions
+                </button>
+                <span class="action-card-hint">Resumable anytime</span>
+              </div>
+            </div>
+
+            <div class="action-card">
+              <div>
+                <div class="action-card-top">
+                  <span class="action-card-title">Stage 5: Rebuild Search &amp; Museum Data</span>
+                  <span class="stage-tag tag-emerald">Stage 5</span>
+                </div>
+                <p class="action-card-desc">
+                  Rebuilds the FTS5 full-text search index (<code>ai_search_fts</code> across captions, filenames, videos, locations, and people names) and exports fresh <code>catalog_data.js</code> and <code>catalog.json</code>.
+                </p>
+              </div>
+              <div class="action-card-foot">
+                <button id="btnStage5" class="btn btn-success stage-run-btn" type="button" onclick="runSpecificStages(['stage5'], 'Stage 5: Rebuild Search &amp; Museum Sync')">
+                  ✨ Sync Museum &amp; Search
+                </button>
+                <span class="action-card-hint">Sub-second SQLite export</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 3: CURATION & PEOPLE STUDIO -->
+      <section id="sec-curation" class="studio-section" data-tab="curation">
+        <div class="card">
+          <div class="section-head">
+            <div>
+              <h2>Archive Curation &amp; Identity Studio</h2>
+              <p class="section-sub">
+                All edits to your archive happen here in the Control Center — keeping your Offline Museum Viewer cleanly read-only while committing every change directly to SQLite and FTS5 search.
+              </p>
+            </div>
+          </div>
+
+          <div class="action-grid">
+            <div class="action-card">
+              <div>
+                <div class="action-card-top">
+                  <span class="action-card-title">Manage &amp; Merge People Clusters</span>
+                  <span class="stage-tag tag-cyan">SQLite + FTS5</span>
+                </div>
+                <p class="action-card-desc">
+                  Opens the Identity Studio popup to name recurring people ("Mom", "Alex", etc.) or merge split face clusters of the same person. Updates <code>people_faces</code>, <code>ai_search_fts</code>, and the Museum Viewer immediately.
+                </p>
+              </div>
+              <div class="action-card-foot">
+                <button id="btnManagePeople" class="btn btn-cyan" type="button" onclick="openPeopleManager()">👥 Manage &amp; Merge People</button>
+                <span class="action-card-hint">Interactive Identity Studio</span>
+              </div>
+            </div>
+
+            <div class="action-card">
+              <div>
+                <div class="action-card-top">
+                  <span class="action-card-title">Quarantine Flagged Homework &amp; Docs</span>
+                  <span class="stage-tag tag-amber">Move Files</span>
+                </div>
+                <p class="action-card-desc">
+                  Safely moves all items flagged as homework, receipts, whiteboards, or study notes out of chronological photo folders into <code>content/documents/homework_archive/</code> while updating all SQLite path pointers.
+                </p>
+              </div>
+              <div class="action-card-foot">
+                <button id="btnQuarantineDocs" class="btn btn-warning" type="button" onclick="quarantineHomework()">📄 Quarantine Docs</button>
+                <span class="action-card-hint">Zero deletion — safe move</span>
+              </div>
+            </div>
+
+            <div class="action-card">
+              <div>
+                <div class="action-card-top">
+                  <span class="action-card-title">Refresh Museum Data Now</span>
+                  <span class="stage-tag tag-emerald">Instant Sync</span>
+                </div>
+                <p class="action-card-desc">
+                  Runs an instant SQLite-to-Viewer refresh: rebuilds <code>ai_search_fts</code> across photos and videos and overwrites <code>viewer/catalog_data.js</code> and <code>catalog.json</code> without re-scanning any files.
+                </p>
+              </div>
+              <div class="action-card-foot">
+                <button id="btnSyncMuseum" class="btn btn-secondary" type="button" onclick="syncMuseum()">🔄 Refresh Museum Data</button>
+                <span class="action-card-hint">Updates viewer.html data</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 4: STORAGE & AI CONFIGURATION -->
+      <section id="sec-config" class="studio-section" data-tab="config">
+        <div class="card">
+          <div class="section-head">
+            <div>
+              <h2>Storage Strategy, Thermal Profile &amp; Rebuild Options</h2>
+              <p class="section-sub">
+                Choose how files are ingested into the Active Archive selected above, tune Apple Silicon RAM usage, and control incremental vs. rebuild behavior.
+              </p>
+            </div>
+          </div>
+
+          <div class="options-grid">
+            <div class="option-group">
+              <label class="title">Storage Mode</label>
+              <div class="subtitle">Determines whether files move into folders in-place or copy from a separate external/source drive.</div>
+              <div class="segmented">
+                <button id="modeInPlace" class="seg-btn active" type="button" onclick="setMode('in_place')">
+                  <strong>In-Place Move</strong>
+                  <small>0 GB extra disk space. Moves files cleanly inside the archive folder.</small>
+                </button>
+                <button id="modeSafeCopy" class="seg-btn" type="button" onclick="setMode('safe_copy')">
+                  <strong>Safe Copy</strong>
+                  <small>Keeps your Source Folder untouched and copies files into Destination.</small>
+                </button>
+              </div>
+            </div>
+
+            <div class="option-group">
+              <label class="title">AI Memory &amp; Thermal Speed Profile</label>
+              <div class="subtitle">Controls Ollama Vision AI pacing and scheduled model RAM recycling checkpoints.</div>
+              <div class="segmented">
+                <button id="speedWhisper" class="seg-btn active" type="button" onclick="setSpeed('whisper')">
+                  <strong>Whisper Mode</strong>
+                  <small>Cool &amp; quiet (~2.2 GB RAM, 50-item recycle cadence, gentle pacing).</small>
+                </button>
+                <button id="speedTurbo" class="seg-btn" type="button" onclick="setSpeed('turbo')">
+                  <strong>Turbo Mode</strong>
+                  <small>Maximum throughput (zero pause, 200-item recycle cadence).</small>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div class="feature-cards">
+            <label class="feature-check-card">
+              <input type="checkbox" id="chkBiometrics" checked>
+              <div>
+                <div class="feature-check-title">Enable Face Recognition &amp; Family Clustering (ArcFace 512-d)</div>
+                <div class="feature-check-desc">
+                  Runs local InsightFace neural detection on newly added photos, stores 512-d embeddings in SQLite, and groups recurring faces into person clusters.
+                </div>
+              </div>
+            </label>
+
+            <label class="feature-check-card">
+              <input type="checkbox" id="chkVision" checked>
+              <div>
+                <div class="feature-check-title">Enable Local Vision AI Captions &amp; Homework Detection (Moondream)</div>
+                <div class="feature-check-desc">
+                  Uses offline Ollama <code>moondream</code> to write natural captions, search tags, scene labels, and detect study notes/documents automatically.
+                </div>
+              </div>
+            </label>
+          </div>
+
+          <div class="advanced-box">
+            <div class="advanced-head">
+              <span class="title">Incremental &amp; Rebuild Safety Controls</span>
+              <span class="hint">Leave both unchecked for fast, non-destructive incremental runs that only scan newly added media and preserve custom people names.</span>
+            </div>
+            <div class="checks-row">
+              <label title="Re-run EXIF extraction, web proxy generation, image validation, and face detection across all media items (existing AI captions stay preserved).">
+                <input type="checkbox" id="chkReprocess">
+                <span>
+                  Force Reprocess Existing Media
+                  <small class="muted-inline">(re-scans EXIF, proxies, validation &amp; face detection on all items; preserves AI captions)</small>
+                </span>
+              </label>
+              <label title="Re-cluster all face embeddings from scratch and regenerate avatar crops.">
+                <input type="checkbox" id="chkRecluster" onchange="toggleReclusterWarning()">
+                <span>
+                  Force Full Face Re-Cluster
+                  <small class="muted-inline">(re-groups all saved 512-d face embeddings from scratch &amp; overwrites avatars)</small>
+                </span>
+              </label>
+            </div>
+            <div id="reclusterWarn" class="warn-banner" style="display: none;">
+              <strong>Warning:</strong> Force Full Face Re-Cluster reassigns all cluster IDs from scratch and overwrites avatar thumbnails; custom people names and manual cluster merges will need to be verified afterward.
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 5: SYSTEM READINESS & PRE-FLIGHT DIAGNOSTICS -->
+      <section id="sec-health" class="studio-section" data-tab="health">
+        <div class="card">
+          <div class="section-head">
+            <div>
+              <h2>System Readiness &amp; Dependency Setup Wizard</h2>
+              <p class="section-sub">
+                Verifies free storage safety floor, local Ollama Vision runtime, InsightFace biometric libraries, and ExifTool / HEIC decoders before launching heavy AI stages.
+              </p>
+            </div>
+            <button class="btn btn-secondary btn-sm" type="button" onclick="runPreflight()" title="Re-check disk space, Ollama daemon, model weights, InsightFace, and ExifTool">
+              🔄 Re-Run System Audit
+            </button>
+          </div>
+
+          <div class="diag-grid" id="diagGrid">
+            <div class="diag-item">
+              <div>
+                <div class="diag-head"><span>Disk Safety Floor</span><span id="diagDiskBadge" class="badge-warn">Pending</span></div>
+                <div class="diag-sub" id="diagDiskSub">Select an archive folder to verify &ge;15.0 GiB free space.</div>
+              </div>
+              <div class="diag-explain">Prevents disk exhaustion while writing SQLite indexes, JPEG caches, and Safe Copy duplicates.</div>
+            </div>
+
+            <div class="diag-item">
+              <div>
+                <div class="diag-head"><span>Local Vision AI (Ollama)</span><span id="diagOllamaBadge" class="badge-warn">Checking...</span></div>
+                <div class="diag-sub" id="diagOllamaSub">Checking http://127.0.0.1:11434</div>
+                <div class="diag-explain" style="margin-top: 6px;">
+                  <strong>Start Ollama</strong> launches the offline daemon. <strong>Pull Moondream</strong> downloads the ~1.7 GB local captioning model once.
+                </div>
+              </div>
+              <div class="row">
+                <button class="btn btn-secondary btn-sm" type="button" onclick="startOllama()">Start Ollama</button>
+                <button class="btn btn-secondary btn-sm" type="button" onclick="pullMoondream()">Pull Moondream</button>
+              </div>
+            </div>
+
+            <div class="diag-item">
+              <div>
+                <div class="diag-head"><span>Biometrics (ArcFace)</span><span id="diagBioBadge" class="badge-warn">Checking...</span></div>
+                <div class="diag-sub" id="diagBioSub">Checking InsightFace &amp; ONNX providers...</div>
+                <div class="diag-explain" style="margin-top: 6px;">
+                  Uses CoreML / CPU ONNX execution providers for 100% offline face detection and clustering.
+                </div>
+              </div>
+              <div class="row" id="bioInstallRow">
+                <button id="btnInstallBio" class="btn btn-secondary btn-sm" type="button" onclick="installBiometrics()">Install Face AI</button>
+              </div>
+            </div>
+
+            <div class="diag-item">
+              <div>
+                <div class="diag-head"><span>Metadata &amp; HEIC Tools</span><span id="diagToolsBadge" class="badge-warn">Checking...</span></div>
+                <div class="diag-sub" id="diagToolsSub">Checking ExifTool, sips, pillow-heif...</div>
+              </div>
+              <div class="diag-explain">Uses ExifTool &amp; macOS <code>sips</code> / <code>pillow-heif</code> for iPhone HEIC decoding and rich camera EXIF parsing.</div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
 
   <!-- People Cluster Manager Modal (all edits write directly to SQLite & catalog_data.js) -->
   <div id="peopleManagerModal" class="modal-backdrop" onclick="closePeopleManager(event)" role="dialog" aria-modal="true" aria-label="Manage and merge people">
@@ -155,14 +666,14 @@
       <div class="modal-head">
         <div>
           <h2>Manage &amp; Merge People Clusters</h2>
-          <p class="modal-sub">All edits write directly to SQLite and refresh the Offline Museum catalog immediately.</p>
+          <p class="modal-sub">All edits write directly to SQLite, update <code>ai_search_fts</code>, and refresh the Offline Museum catalog immediately.</p>
         </div>
         <button class="modal-close" onclick="closePeopleManager()" type="button" aria-label="Close modal">&times;</button>
       </div>
       <div class="modal-body">
         <div class="merge-card">
           <div class="merge-title">Merge Duplicate Identity</div>
-          <div class="merge-sub">Combine all faces from one cluster into another, keeping the target identity.</div>
+          <div class="merge-sub">Combine all faces from one cluster into another, keeping the target identity name and deleting the duplicate source cluster.</div>
           <div class="merge-row">
             <select id="mergeSourceSelect" class="input-select" aria-label="Source cluster"></select>
             <span class="muted-inline" style="font-weight: 600;">into</span>

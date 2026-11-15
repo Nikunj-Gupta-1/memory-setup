@@ -229,3 +229,106 @@ def test_gui_server_range_streaming_and_open_media(tmp_path: Path) -> None:
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_standalone_server_password_gate_search_and_readonly(tmp_path: Path) -> None:
+    import http.cookiejar
+
+    ctx = _build_archive_with_videos(tmp_path)
+    run_stage5_museum(ctx, overwrite_html=True)
+
+    conn = get_connection(ctx.db_path, readonly=True)
+    avi_rel = conn.execute("SELECT current_path FROM media_items WHERE original_ext = '.avi'").fetchone()[0]
+    conn.close()
+
+    socketserver.ThreadingTCPServer.allow_reuse_address = True
+    httpd = socketserver.ThreadingTCPServer(("127.0.0.1", 0), standalone_server.MuseumHandler)
+    httpd.root_dir = ctx.archive_root  # type: ignore[attr-defined]
+    httpd.db_path = ctx.db_path  # type: ignore[attr-defined]
+    httpd.museum_password = "family-secret-pass"  # type: ignore[attr-defined]
+    httpd.museum_read_only = True  # type: ignore[attr-defined]
+    port = httpd.server_address[1]
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+
+    try:
+        base = f"http://127.0.0.1:{port}"
+
+        # Unauthenticated page and API requests must return 401
+        try:
+            urllib.request.urlopen(f"{base}/viewer/viewer.html", timeout=5)
+            assert False, "Expected 401 before login"
+        except urllib.error.HTTPError as exc:
+            assert exc.code == 401
+            assert b"/__museum_login" in exc.read()
+
+        try:
+            urllib.request.urlopen(f"{base}/api/search?q=Family", timeout=5)
+            assert False, "Expected 401 for unauthenticated /api/search"
+        except urllib.error.HTTPError as exc:
+            assert exc.code == 401
+
+        # Wrong password rejected
+        bad_login = urllib.request.Request(
+            f"{base}/__museum_login",
+            data=json.dumps({"password": "wrong"}).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            urllib.request.urlopen(bad_login, timeout=5)
+            assert False, "Expected 401 for wrong password"
+        except urllib.error.HTTPError as exc:
+            assert exc.code == 401
+
+        # Valid login via JSON sets signed HttpOnly cookie
+        jar = http.cookiejar.CookieJar()
+        opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
+        good_login = urllib.request.Request(
+            f"{base}/__museum_login",
+            data=json.dumps({"password": "family-secret-pass"}).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with opener.open(good_login, timeout=5) as resp:
+            assert resp.status == 200
+            assert json.loads(resp.read().decode("utf-8"))["ok"] is True
+
+        # Authenticated viewer, FTS5 search, and Range video streaming succeed
+        with opener.open(f"{base}/viewer/viewer.html", timeout=5) as resp:
+            assert resp.status == 200
+            assert b"ALL_PHOTOS" in resp.read() or b"Offline Museum" in resp.read()
+
+        with opener.open(f"{base}/api/search?q=Family", timeout=5) as resp:
+            assert resp.status == 200
+            search_data = json.loads(resp.read().decode("utf-8"))
+            assert search_data["ok"] is True
+            assert any(r["filename"] == "family.jpg" for r in search_data["results"])
+
+        rng_req = urllib.request.Request(f"{base}/{avi_rel}", headers={"Range": "bytes=0-3"})
+        with opener.open(rng_req, timeout=5) as resp:
+            assert resp.status == 206
+            assert resp.read() == b"RIFF"
+
+        # Raw SQLite file download is always blocked even when authenticated
+        try:
+            opener.open(f"{base}/viewer/catalog.sqlite", timeout=5)
+            assert False, "Expected 403 for direct sqlite download"
+        except urllib.error.HTTPError as exc:
+            assert exc.code == 403
+
+        # Read-only share mode rejects POST /api/open-media
+        open_req = urllib.request.Request(
+            f"{base}/api/open-media",
+            data=json.dumps({"path": f"../{avi_rel}"}).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            opener.open(open_req, timeout=5)
+            assert False, "Expected 403 in read-only share mode"
+        except urllib.error.HTTPError as exc:
+            assert exc.code == 403
+    finally:
+        httpd.shutdown()
+        httpd.server_close()

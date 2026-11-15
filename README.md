@@ -24,12 +24,12 @@ Built and battle-tested on a real **33,771-file personal archive (2007–2026)**
   * Isolates math notebooks, worksheets, receipts, and code screenshots while disqualifying photos with detected faces or celebration scenes (birthday cakes, weddings, churches, dining tables).
 * **Offline Spatial Reverse-Geocoder**:
   * `scipy.spatial.cKDTree` over 3D ECEF coordinates with a strict `150.0 km` Haversine cutoff so remote ocean coordinates never false-match distant coastal cities.
-* **Offline Video Cinema & Read-Only Dual-Theme Museum UI**:
-  * Interactive read-only `viewer.html` (Warm Archival Daylight & Darkroom themes) with keyboard-navigable lightbox across both Photos and **Videos** (`ALL_VIDEOS`), HTTP `206` byte-range video streaming in `server.py` and the Control Center, Live Photo clip toggles, **People** & **World Map** filtering, and **Open in System Player** (`/api/open-media`) + download fallbacks for legacy `.avi` clips.
-* **Incremental Re-Run Safe (With Explicit GUI Rebuild Toggles)**:
-  * Drop new photo/video folders into an existing archive and re-run **Organize & Build Museum**: runtime scripts/DB files at archive root are ignored, exact duplicates are caught cleanly, only new media enters Stages 1–4B, and existing AI captions, custom people names, and merged clusters are preserved unless **Force Reprocess Existing Media** (`--reprocess`) or **Force Full Face Re-Cluster** (`--recluster`) is checked in the Control Center GUI.
+* **Offline Video Cinema & Read-Only Dual-Theme Museum UI (With Optional Remote Password Gate)**:
+  * Interactive read-only `viewer.html` (Warm Archival Daylight & Darkroom themes) with keyboard-navigable lightbox across both Photos and **Videos** (`ALL_VIDEOS`), HTTP `206` byte-range video streaming in `server.py` and the Control Center, Live Photo clip toggles, **People** & **World Map** filtering, **Open in System Player** (`/api/open-media`) + download fallbacks for legacy `.avi` clips, read-only `/api/search` FTS5 endpoint, and optional `--password` / `MUSEUM_PASSWORD` + `--read-only` session-cookie authentication for sharing the viewer over Tailscale or Cloudflare Tunnel while keeping the Control Center strictly local.
+* **Incremental Re-Run Safe & Consolidated Single-Schema SQLite**:
+  * Drop new photo/video folders into an existing archive and re-run **Organize & Build Museum** (or trigger individual stages in **Stage-by-Stage Runner**): all stages share one consolidated `viewer/catalog.sqlite` schema (no duplicate per-stage tables), runtime scripts/DB files at archive root are ignored, exact duplicates are caught cleanly, only new media enters Stages 1–4B, and existing AI captions, custom people names, and merged clusters are preserved unless **Force Reprocess Existing Media** (`--reprocess`) or **Force Full Face Re-Cluster** (`--recluster`) is checked in the Control Center Studio.
 * **Anti-Clobber Museum Protection & 15.0 GiB Disk Safety Floor**:
-  * Never overwrites a customized `viewer/viewer.html` or manual `person_name` edits during rebuilds (`--overwrite-html` required to reset HTML), keeps all mutating controls inside the **Memory Setup Control Center**, and halts heavy ingestion if free disk drops below `15.0 GiB`.
+  * Never overwrites a customized `viewer/viewer.html` or manual `person_name` edits during rebuilds (`--overwrite-html` required to reset HTML), keeps all mutating controls inside the **Memory Setup Studio Control Center**, and halts heavy ingestion if free disk drops below `15.0 GiB`.
 
 ---
 
@@ -58,7 +58,7 @@ Memory_Setup/
 │       ├── start_viewer.command   # 1-click archive museum launcher
 │       └── *.md                   # Manifesto, Progress Report, System Ledger & Handoff
 ├── scripts/                       # Native macOS universal launcher C source
-├── tests/                         # 36 unit & integration tests (offline/mocked VLM)
+├── tests/                         # 40 unit & integration tests (offline/mocked VLM)
 ├── pyproject.toml
 ├── Memory Setup.app/              # 1-click zero-Terminal macOS app bundle
 ├── Start_Memory_Setup.command     # macOS setup & detached launcher
@@ -114,17 +114,27 @@ Memory Setup launches directly as a native desktop **Control Center** window (ba
 
 ---
 
-### Inside the Control Center (Windows & macOS)
-1. **Setup Wizard Cards**:
-   * Click **Start Ollama** and **Pull Moondream** (`~1.7 GB` download) to enable offline AI photo descriptions.
-   * Click **Install Face AI** *(optional)* to install InsightFace ArcFace `buffalo_l` facial clustering directly inside the app.
-2. **Choose Folders & Mode**:
-   * For a **Safe First Test** (recommended with 20–50 sample photos): select **Safe Copy (Keep Originals)** -> pick an empty destination via **Browse Archive...** (e.g. `Desktop/TestMuseum`) and pick your sample folder via **Browse Source...** (`Desktop/TestPhotos`). Your original files remain untouched.
-   * Click **Audit Folder** to check free disk space (`>= 15.0 GiB` safety floor) and verify local tools.
-3. **Run, Manage & Browse (All Edits in Control Center Only)**:
-   * Choose **Whisper** (lowest RAM / coolest) or **Turbo**, leave **Force Reprocess** / **Force Full Face Re-Cluster** unchecked for incremental additions (or check them for a full rebuild), then click **Organize & Build Museum**.
-   * Use **Pause & Flush RAM** anytime to stop cleanly and resume later with **Resume Vision AI Only**.
-   * Use **Manage & Merge People** to rename or merge face clusters directly in SQLite & `catalog_data.js`, click **Quarantine Docs** to move flagged homework/notes into `content/documents/homework_archive/`, or click **Open Offline Museum Viewer** to explore photos, videos, world map, people filters, and full-text search in the read-only viewer.
+### Inside the Control Center Studio (Windows & macOS)
+
+The Control Center opens with a persistent Active Archive bar, live execution progress strip, and left sidebar menu organizing workflows into focused panels (with clear descriptions right beside every control):
+1. **Overview & Run**: Displays 8 live SQLite telemetry cards (`Total Media`, `Master Photos`, `Videos`, `GPS Mapped`, `Faces Detected`, `People Clusters`, `AI Captioned`, `Docs Flagged`) alongside Master Controls (**Organize & Build Museum**, **Resume Vision AI Only**, **Pause & Flush RAM**, and **Open Offline Museum Viewer**).
+2. **Stage-by-Stage Runner**: Trigger individual pipeline stages cleanly on demand — **Stage 1: Discovery & Deduplication**, **Stage 2: EXIF, Offline GPS & HEIC**, **Stage 3: Chronological Folders & dHash**, **Stages 1–3 Combined (Ingest Only)**, **Stage 4A: Face Detection & Clustering**, **Stage 4A-Fast: Re-Cluster Saved Faces Only** (`<2s`), **Stage 4B: Vision AI & Homework Scan**, and **Stage 5: Sync Museum & Search**.
+3. **Curation & People**: **Manage & Merge People** (rename or merge clusters atomically across SQLite + FTS5 + `catalog_data.js`), **Quarantine Docs** (`content/documents/homework_archive/`), and **Refresh Museum Data**.
+4. **Storage & AI Profile**: Configure **In-Place Move** vs. **Safe Copy** (with Source folder picker), **Whisper** (`50`-item recycle) vs. **Turbo** (`200`-item recycle), master AI toggles, and **Incremental & Rebuild Safety Controls** (`Force Reprocess Existing Media`, `Force Full Face Re-Cluster`).
+5. **System Readiness**: Inspect disk safety floor (`>= 15.0 GiB`), launch Ollama (**Start Ollama**), download vision weights (**Pull Moondream**), install biometrics (**Install Face AI**), and verify ExifTool / HEIC decoders.
+6. **Show All Panels**: Unified single-scroll layout displaying every panel simultaneously.
+
+### Optional: Private Remote Family Access (Museum Viewer Only)
+
+To share **only the Offline Museum Viewer** (`viewer.html` + `/api/search` + video streaming) with family members over the internet — keeping the Control Center strictly local on `127.0.0.1:8765` — start the standalone museum server with `--read-only`, `--password`, and `--no-browser`:
+
+```bash
+MUSEUM_PASSWORD="your-family-password" \
+  python3 /path/to/YourArchive/viewer/server.py --host 127.0.0.1 --port 8080 --read-only --no-browser
+```
+
+* **Option 1 — Tailscale (Zero Open Ports, Best for Close Family)**: Install Tailscale on your Mac (`tailscale up`) and run `tailscale serve 8080` so invited family devices on your tailnet get encrypted HTTPS access with zero public internet exposure (or bind `--host 0.0.0.0` for direct tailnet IP access + `--password`).
+* **Option 2 — Cloudflare Tunnel (`cloudflared`) + Password / Zero Trust Access**: Run `cloudflared tunnel --url http://127.0.0.1:8080` (or a named tunnel with Cloudflare Zero Trust Email OTP) while `server.py --read-only --password ...` enforces an HMAC-signed `HttpOnly` login cookie and blocks `.sqlite` downloads.
 
 <details>
 <summary>Optional Headless CLI Commands (Advanced Users)</summary>
@@ -178,7 +188,7 @@ YourArchive/
 ├── start_viewer.bat          (Top-level 1-click Windows museum launcher)
 └── viewer/                   <-- Offline Museum Runtime & AI Metadata
     ├── content               (Relative symlink -> ../content)
-    ├── catalog.sqlite        (SQLite + FTS5 full-text search index)
+    ├── catalog.sqlite        (Unified SQLite DB + FTS5 search index across all stages)
     ├── catalog_data.js       (Zero-config offline JS bundle)
     ├── catalog.json          (Master JSON export)
     ├── ai_manifest.json      (Validated processing manifest JSON)

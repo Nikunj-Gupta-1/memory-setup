@@ -18,7 +18,7 @@ from memory_setup.config import (
     OLLAMA_NUM_PREDICT,
     OLLAMA_RSS_LIMIT_MB,
 )
-from memory_setup.db import get_connection
+from memory_setup.db import get_connection, init_db, record_checkpoint
 from memory_setup.vision.classifier import classify_description
 
 DEFAULT_PROMPT = (
@@ -137,6 +137,7 @@ def run_vision_pipeline(
     Execute Stage 4B/4C: Single-worker memory-bounded local VLM captioning and document flagging.
     Supports cooperative pause/stop via `stop_event` with guaranteed runner teardown.
     """
+    init_db(ctx.db_path)
     conn = get_connection(ctx.db_path)
     cursor = conn.cursor()
 
@@ -145,6 +146,7 @@ def run_vision_pipeline(
         SELECT p.media_id, p.processing_path, e.city, e.country
         FROM processing_inputs p
         LEFT JOIN metadata_exif e ON p.media_id = e.media_id
+        WHERE COALESCE(p.validation_status, 'VALID') NOT IN ('CORRUPT', 'MISSING')
         ORDER BY p.media_id ASC
         """
     ).fetchall()
@@ -161,8 +163,16 @@ def run_vision_pipeline(
         remaining = remaining[:limit]
 
     if not remaining:
+        summary = {
+            "status": "complete",
+            "processed": 0,
+            "already_described": len(already_described),
+            "homework_flagged": 0,
+        }
+        if limit is None:
+            _record_vision_checkpoint(ctx, conn, cursor, len(rows), 0, summary)
         conn.close()
-        return {"status": "complete", "processed": 0, "already_described": len(already_described), "homework_flagged": 0}
+        return summary
 
     client = MemoryBoundedOllamaClient(
         base_url=ctx.ollama_url,
@@ -243,15 +253,46 @@ def run_vision_pipeline(
             _flush_vision_batch(conn, cursor, batch_records)
             batch_records.clear()
         client.recycle_runner()
-        conn.close()
 
-    return {
-        "status": "paused" if (stop_event and stop_event.is_set()) else "complete",
+    paused = bool(stop_event and stop_event.is_set())
+    summary = {
+        "status": "paused" if paused else "complete",
         "processed": processed_count,
         "homework_flagged": homework_count,
         "errors": errors,
         "elapsed_seconds": round(time.time() - start_time, 2),
     }
+    if not paused and limit is None:
+        _record_vision_checkpoint(ctx, conn, cursor, len(rows), errors, summary)
+    conn.close()
+    return summary
+
+
+def _record_vision_checkpoint(
+    ctx: ArchiveContext,
+    conn: Any,
+    cursor: Any,
+    total_valid: int,
+    errors: int,
+    summary: Dict[str, Any],
+) -> None:
+    """Persist Stage 4 Vision completion report & checkpoint inside unified `catalog.sqlite`."""
+    total_captioned = int(
+        cursor.execute("SELECT COUNT(*) FROM ai_descriptions").fetchone()[0] or 0
+    )
+    ctx.reports_dir.mkdir(parents=True, exist_ok=True)
+    report_path = ctx.reports_dir / "stage4_vision_report.json"
+    report_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    record_checkpoint(
+        conn,
+        "stage4_vision",
+        total_valid,
+        total_captioned,
+        errors,
+        ctx.to_rel(report_path),
+        summary,
+    )
+    conn.commit()
 
 
 def _flush_vision_batch(conn, cursor, batch_records: List[tuple]) -> None:

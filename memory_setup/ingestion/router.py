@@ -613,7 +613,15 @@ def run_stage1_consolidation(
         "errors": errors[:30],
     }
     report_json_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
-    record_checkpoint(conn, "stage1_consolidation", len(items), success_count, failure_count, str(report_json_path), summary)
+    record_checkpoint(
+        conn,
+        "stage1_consolidation",
+        len(items),
+        success_count,
+        failure_count,
+        ctx.to_rel(report_json_path),
+        summary,
+    )
     conn.commit()
     conn.close()
     return summary
@@ -688,6 +696,7 @@ def run_stage2_standardization(
         raise RuntimeError(f"Free disk space ({free_gb:.2f} GiB) below threshold ({ctx.min_free_disk_gb} GiB).")
 
     do_reprocess = ctx.reprocess if reprocess is None else reprocess
+    init_db(ctx.db_path)
     conn = get_connection(ctx.db_path)
     cursor = conn.cursor()
     total_photos = int(
@@ -956,7 +965,15 @@ def run_stage2_standardization(
     }
     report_path = ctx.reports_dir / "stage2_report.json"
     report_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
-    record_checkpoint(conn, "stage2_standardization", total_photos, total_inputs_ready, failed_conv, str(report_path), summary)
+    record_checkpoint(
+        conn,
+        "stage2_standardization",
+        total_photos,
+        total_inputs_ready,
+        failed_conv,
+        ctx.to_rel(report_path),
+        summary,
+    )
     conn.commit()
     conn.close()
     return summary
@@ -1023,15 +1040,17 @@ def run_stage3_validation(
 ) -> Dict[str, Any]:
     """Execute Stage 3: Byte/raster validation, dHash computation, and canonical AI manifest export."""
     do_reprocess = ctx.reprocess if reprocess is None else reprocess
+    init_db(ctx.db_path)
     conn = get_connection(ctx.db_path)
     cursor = conn.cursor()
 
     rows = cursor.execute(
         """
-        SELECT p.media_id, p.processing_path, p.format, p.pixel_width, p.pixel_height,
+        SELECT p.media_id, p.processing_path, p.is_reused_original, p.format, p.pixel_width, p.pixel_height,
                p.aspect_ratio, p.megapixels, p.color_mode, p.sha256_processing,
                p.dhash, p.validation_status,
                m.current_path, m.original_rel_path, m.capture_timestamp, m.has_unknown_date,
+               m.sha256_original,
                e.make, e.model, e.gps_latitude, e.gps_longitude, e.city, e.country
         FROM processing_inputs p
         JOIN media_items m ON p.media_id = m.id
@@ -1161,35 +1180,38 @@ def run_stage3_validation(
 
     match_dict = {m["unknown_id"]: m for m in matches_found}
 
+    # Persist dHash match pointers directly into `media_items` (single unified catalog schema).
     cursor.execute("DROP TABLE IF EXISTS ai_manifest")
-    cursor.execute(
-        """
-        CREATE TABLE ai_manifest (
-            id TEXT PRIMARY KEY,
-            original_path TEXT NOT NULL,
-            current_path TEXT NOT NULL,
-            processing_path TEXT NOT NULL,
-            format TEXT NOT NULL,
-            pixel_width INTEGER NOT NULL,
-            pixel_height INTEGER NOT NULL,
-            aspect_ratio REAL NOT NULL,
-            megapixels REAL NOT NULL,
-            color_mode TEXT NOT NULL,
-            sha256_processing TEXT NOT NULL,
-            dhash TEXT,
-            capture_timestamp TEXT,
-            has_unknown_date INTEGER NOT NULL,
-            camera_make TEXT,
-            camera_model TEXT,
-            gps_latitude REAL,
-            gps_longitude REAL,
-            city TEXT,
-            country TEXT,
-            matched_dated_id TEXT,
-            matched_timestamp TEXT
+    now_iso = datetime.now(timezone.utc).isoformat()
+    if do_reprocess:
+        cursor.execute(
+            "UPDATE media_items SET matched_dated_id = NULL, matched_timestamp = NULL WHERE media_type = 'photo'"
         )
-        """
-    )
+    elif unknown_items:
+        cursor.executemany(
+            "UPDATE media_items SET matched_dated_id = NULL, matched_timestamp = NULL WHERE id = ?",
+            [(u["media_id"],) for u in unknown_items],
+        )
+
+    if matches_found:
+        cursor.executemany(
+            "UPDATE media_items SET matched_dated_id = ?, matched_timestamp = ?, updated_at = ? WHERE id = ?",
+            [(m["matched_id"], m["matched_timestamp"], now_iso, m["unknown_id"]) for m in matches_found],
+        )
+
+    reused_hash_updates = [
+        (validated[it["media_id"]]["sha256"], now_iso, it["media_id"])
+        for it in all_items
+        if it.get("is_reused_original") == 1
+        and not it.get("sha256_original")
+        and validated.get(it["media_id"], {}).get("status") == "VALID"
+        and validated[it["media_id"]].get("sha256")
+    ]
+    if reused_hash_updates:
+        cursor.executemany(
+            "UPDATE media_items SET sha256_original = ?, updated_at = ? WHERE id = ? AND sha256_original IS NULL",
+            reused_hash_updates,
+        )
 
     manifest_rows = []
     for item in all_items:
@@ -1225,10 +1247,6 @@ def run_stage3_validation(
             )
         )
 
-    cursor.executemany(
-        "INSERT INTO ai_manifest VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        manifest_rows,
-    )
     if do_reprocess:
         cursor.execute("UPDATE media_items SET processing_status = 'stage3_validated' WHERE media_type = 'photo'")
     else:
@@ -1290,7 +1308,15 @@ def run_stage3_validation(
     }
     report_path = ctx.reports_dir / "stage3_report.json"
     report_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
-    record_checkpoint(conn, "stage3_validation", len(all_items), valid_count, corrupt_count, str(report_path), summary)
+    record_checkpoint(
+        conn,
+        "stage3_validation",
+        len(all_items),
+        valid_count,
+        corrupt_count,
+        ctx.to_rel(report_path),
+        summary,
+    )
     conn.commit()
     conn.close()
     return summary

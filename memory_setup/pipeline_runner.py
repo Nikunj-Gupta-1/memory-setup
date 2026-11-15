@@ -62,6 +62,16 @@ def get_archive_metrics(archive_root: Path) -> Dict[str, Any]:
     return metrics
 
 
+DEFAULT_STAGES: List[str] = [
+    "stage1",
+    "stage2",
+    "stage3",
+    "stage4_faces",
+    "stage4_vision",
+    "stage5",
+]
+
+
 class PipelineManager:
     """Thread-safe orchestrator executing Stages 1-5 with live telemetry and cooperative stop."""
 
@@ -109,6 +119,7 @@ class PipelineManager:
                 return False
             self.active_ctx = ctx
             self._stop_event.clear()
+            explicit_stages = stages is not None
             self.state.update(
                 {
                     "running": True,
@@ -124,7 +135,7 @@ class PipelineManager:
             )
             self._thread = threading.Thread(
                 target=self._run_worker,
-                args=(ctx, stages or ["stage1", "stage2", "stage3", "stage4_faces", "stage4_vision", "stage5"]),
+                args=(ctx, stages or list(DEFAULT_STAGES), explicit_stages),
                 daemon=True,
             )
             self._thread.start()
@@ -136,26 +147,32 @@ class PipelineManager:
             if self.state["running"]:
                 self.state["message"] = "Stopping gracefully and flushing memory..."
 
-    def _run_worker(self, ctx: ArchiveContext, stages: List[str]) -> None:
+    def _run_worker(
+        self,
+        ctx: ArchiveContext,
+        stages: List[str],
+        explicit_stages: bool = False,
+    ) -> None:
         results: Dict[str, Any] = {}
+        targeted_run = explicit_stages and set(stages) != set(DEFAULT_STAGES)
         try:
             if "stage1" in stages and not self._stop_event.is_set():
-                self._on_progress({"stage": "stage1", "current": 0, "total": 1, "message": "Stage 1: Consolidating & pairing files..."})
+                self._on_progress({"stage": "stage1", "current": 0, "total": 1, "message": "Stage 1: Discovering files & deduplicating SHA-256 hashes..."})
                 results["stage1"] = run_stage1_consolidation(ctx, progress_cb=self._on_progress)
 
             if "stage2" in stages and not self._stop_event.is_set():
-                self._on_progress({"stage": "stage2", "current": 0, "total": 1, "message": "Stage 2: Extracting EXIF, geocoding & generating proxies..."})
+                self._on_progress({"stage": "stage2", "current": 0, "total": 1, "message": "Stage 2: Extracting EXIF metadata, offline GPS & HEIC proxies..."})
                 results["stage2"] = run_stage2_standardization(
                     ctx, progress_cb=self._on_progress, reprocess=ctx.reprocess
                 )
 
             if "stage3" in stages and not self._stop_event.is_set():
-                self._on_progress({"stage": "stage3", "current": 0, "total": 1, "message": "Stage 3: Validating images & computing perceptual hashes..."})
+                self._on_progress({"stage": "stage3", "current": 0, "total": 1, "message": "Stage 3: Routing chronological folders & perceptual dHash matches..."})
                 results["stage3"] = run_stage3_validation(
                     ctx, progress_cb=self._on_progress, reprocess=ctx.reprocess
                 )
 
-            if "stage4_faces" in stages and ctx.enable_biometrics and not self._stop_event.is_set():
+            if "stage4_faces" in stages and (ctx.enable_biometrics or targeted_run) and not self._stop_event.is_set():
                 self._on_progress({"stage": "stage4_faces", "current": 0, "total": 1, "message": "Stage 4A: Detecting faces & clustering family identities..."})
                 scan_res = run_biometric_face_scan(
                     ctx, progress_cb=self._on_progress, reprocess=ctx.reprocess, stop_event=self._stop_event
@@ -167,7 +184,17 @@ class PipelineManager:
                 )
                 results["stage4_faces"] = {"scan": scan_res, "clustering": cluster_res}
 
-            if "stage4_vision" in stages and ctx.enable_vision and not self._stop_event.is_set():
+            if (
+                "stage4_cluster" in stages
+                and "stage4_faces" not in stages
+                and (ctx.enable_biometrics or targeted_run)
+                and not self._stop_event.is_set()
+            ):
+                self._on_progress({"stage": "stage4_cluster", "current": 0, "total": 1, "message": "Stage 4A-Fast: Re-clustering saved 512-d face embeddings & rebuilding avatars..."})
+                results["stage4_cluster"] = cluster_and_generate_avatars(ctx, recluster=True)
+                self._on_progress({"stage": "stage4_cluster", "current": 1, "total": 1, "message": "Stage 4A-Fast complete: face clusters & avatars refreshed."})
+
+            if "stage4_vision" in stages and (ctx.enable_vision or targeted_run) and not self._stop_event.is_set():
                 self._on_progress({"stage": "stage4_vision", "current": 0, "total": 1, "message": "Stage 4B: Running memory-bounded local Vision AI..."})
                 results["stage4_vision"] = run_vision_pipeline(
                     ctx,

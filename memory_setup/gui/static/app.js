@@ -1,10 +1,23 @@
 let currentMode = 'in_place';
 let currentSpeed = 'whisper';
+let activeStudioTab = 'overview';
+
+function switchStudioTab(tabId) {
+  activeStudioTab = tabId || 'overview';
+  document.querySelectorAll('.nav-item').forEach(btn => {
+    btn.classList.toggle('active', btn.id === `nav-${activeStudioTab}`);
+  });
+  document.querySelectorAll('.studio-section').forEach(sec => {
+    const showAll = activeStudioTab === 'all';
+    const matches = sec.getAttribute('data-tab') === activeStudioTab;
+    sec.classList.toggle('active', showAll || matches);
+  });
+}
 
 function setMode(mode) {
   currentMode = mode;
-  document.getElementById('modeInPlace').classList.toggle('active', mode === 'in_place');
-  document.getElementById('modeSafeCopy').classList.toggle('active', mode === 'safe_copy');
+  document.getElementById('modeInPlace')?.classList.toggle('active', mode === 'in_place');
+  document.getElementById('modeSafeCopy')?.classList.toggle('active', mode === 'safe_copy');
   const srcRow = document.getElementById('safeCopySourceRow');
   if (srcRow) {
     srcRow.style.display = mode === 'safe_copy' ? 'flex' : 'none';
@@ -14,8 +27,8 @@ function setMode(mode) {
 
 function setSpeed(speed) {
   currentSpeed = speed;
-  document.getElementById('speedWhisper').classList.toggle('active', speed === 'whisper');
-  document.getElementById('speedTurbo').classList.toggle('active', speed === 'turbo');
+  document.getElementById('speedWhisper')?.classList.toggle('active', speed === 'whisper');
+  document.getElementById('speedTurbo')?.classList.toggle('active', speed === 'turbo');
 }
 
 async function browseFolder(target = 'archive') {
@@ -59,56 +72,70 @@ async function runPreflight() {
 function renderDiagnostics(d) {
   const disk = d.disk || {};
   const diskBadge = document.getElementById('diagDiskBadge');
-  diskBadge.className = disk.ok ? 'badge-ok' : 'badge-err';
-  diskBadge.innerText = disk.free_gb !== null ? (disk.ok ? 'PASSED' : 'LOW DISK') : 'Pending';
-  document.getElementById('diagDiskSub').innerText = disk.message || '';
+  if (diskBadge) {
+    diskBadge.className = disk.ok ? 'badge-ok' : 'badge-err';
+    diskBadge.innerText = disk.free_gb !== null ? (disk.ok ? 'PASSED' : 'LOW DISK') : 'Pending';
+  }
+  const diskSub = document.getElementById('diagDiskSub');
+  if (diskSub) diskSub.innerText = disk.message || '';
   if (disk.free_gb !== null) {
     document.getElementById('teleDisk').innerText = `${disk.free_gb} GiB`;
   }
 
   const ol = d.ollama || {};
   const olBadge = document.getElementById('diagOllamaBadge');
-  if (ol.running && ol.target_model_ready) {
-    olBadge.className = 'badge-ok';
-    olBadge.innerText = 'READY';
-    document.getElementById('diagOllamaSub').innerText = `${ol.target_model} active at localhost:11434`;
-  } else if (ol.running) {
-    olBadge.className = 'badge-warn';
-    olBadge.innerText = 'MODEL MISSING';
-    document.getElementById('diagOllamaSub').innerText = `Ollama running; pull ${ol.target_model}`;
-  } else {
-    olBadge.className = 'badge-err';
-    olBadge.innerText = ol.binary_installed ? 'STOPPED' : 'NOT INSTALLED';
-    document.getElementById('diagOllamaSub').innerText = ol.binary_installed ? 'Click Start Ollama to launch daemon.' : 'Install Ollama from ollama.com';
+  const olSub = document.getElementById('diagOllamaSub');
+  if (olBadge && olSub) {
+    if (ol.running && ol.target_model_ready) {
+      olBadge.className = 'badge-ok';
+      olBadge.innerText = 'READY';
+      olSub.innerText = `${ol.target_model} active at localhost:11434`;
+    } else if (ol.running) {
+      olBadge.className = 'badge-warn';
+      olBadge.innerText = 'MODEL MISSING';
+      olSub.innerText = `Ollama running; pull ${ol.target_model}`;
+    } else {
+      olBadge.className = 'badge-err';
+      olBadge.innerText = ol.binary_installed ? 'STOPPED' : 'NOT INSTALLED';
+      olSub.innerText = ol.binary_installed ? 'Click Start Ollama to launch daemon.' : 'Install Ollama from ollama.com';
+    }
   }
 
   const bio = d.biometrics || {};
   const bioBadge = document.getElementById('diagBioBadge');
   const btnInstallBio = document.getElementById('btnInstallBio');
   const providers = (d.onnx_providers || []).join(', ') || 'None';
-  if (bio.package_installed && bio.weights_cached) {
-    bioBadge.className = 'badge-ok';
-    bioBadge.innerText = 'READY';
-    if (btnInstallBio) btnInstallBio.style.display = 'none';
-  } else if (bio.package_installed) {
-    bioBadge.className = 'badge-warn';
-    bioBadge.innerText = 'ON FIRST RUN';
-    if (btnInstallBio) btnInstallBio.style.display = 'none';
-  } else {
-    bioBadge.className = 'badge-warn';
-    bioBadge.innerText = 'OPTIONAL';
-    if (btnInstallBio) btnInstallBio.style.display = 'inline-flex';
+  if (bioBadge) {
+    if (bio.package_installed && bio.weights_cached) {
+      bioBadge.className = 'badge-ok';
+      bioBadge.innerText = 'READY';
+      if (btnInstallBio) btnInstallBio.style.display = 'none';
+    } else if (bio.package_installed) {
+      bioBadge.className = 'badge-warn';
+      bioBadge.innerText = 'ON FIRST RUN';
+      if (btnInstallBio) btnInstallBio.style.display = 'none';
+    } else {
+      bioBadge.className = 'badge-warn';
+      bioBadge.innerText = 'OPTIONAL';
+      if (btnInstallBio) btnInstallBio.style.display = 'inline-flex';
+    }
   }
-  document.getElementById('diagBioSub').innerText = `Providers: ${providers}`;
+  const bioSub = document.getElementById('diagBioSub');
+  if (bioSub) bioSub.innerText = `Providers: ${providers}`;
 
   const tools = d.tools || {};
   const tBadge = document.getElementById('diagToolsBadge');
   const exifReady = tools.exiftool?.installed;
   const heicReady = tools.sips?.heic_ready;
-  tBadge.className = (exifReady && heicReady) ? 'badge-ok' : 'badge-warn';
-  tBadge.innerText = (exifReady && heicReady) ? 'READY' : 'FALLBACK ACTIVE';
-  document.getElementById('diagToolsSub').innerText =
-    `ExifTool: ${exifReady ? 'Yes' : 'Pillow Fallback'} | HEIC: ${heicReady ? 'Ready' : 'Standard Formats'}`;
+  if (tBadge) {
+    tBadge.className = (exifReady && heicReady) ? 'badge-ok' : 'badge-warn';
+    tBadge.innerText = (exifReady && heicReady) ? 'READY' : 'FALLBACK ACTIVE';
+  }
+  const tSub = document.getElementById('diagToolsSub');
+  if (tSub) {
+    tSub.innerText =
+      `ExifTool: ${exifReady ? 'Yes' : 'Pillow Fallback'} | HEIC: ${heicReady ? 'Ready' : 'Standard Formats'}`;
+  }
 }
 
 function renderArchiveMetrics(a) {
@@ -118,20 +145,31 @@ function renderArchiveMetrics(a) {
   if (vEl) vEl.innerText = (a.videos || 0).toLocaleString();
   document.getElementById('mGeocoded').innerText = (a.geocoded || 0).toLocaleString();
   document.getElementById('mFaces').innerText = (a.faces_detected || 0).toLocaleString();
+  const cEl = document.getElementById('mClusters');
+  if (cEl) cEl.innerText = (a.people_clusters || 0).toLocaleString();
   document.getElementById('mCaptioned').innerText = (a.ai_captioned || 0).toLocaleString();
   document.getElementById('mHw').innerText = (a.homework_flagged || 0).toLocaleString();
   if (a.free_disk_gb !== undefined) {
     document.getElementById('teleDisk').innerText = `${a.free_disk_gb} GiB`;
   }
+  const opacity = a.has_viewer ? '1' : '0.55';
   const museumBtn = document.getElementById('btnOpenMuseum');
-  museumBtn.style.opacity = a.has_viewer ? '1' : '0.5';
+  if (museumBtn) museumBtn.style.opacity = opacity;
+  const hdrMuseumBtn = document.getElementById('hdrOpenMuseum');
+  if (hdrMuseumBtn) hdrMuseumBtn.style.opacity = opacity;
 }
 
 function renderPipelineState(s) {
   const running = Boolean(s.running);
-  document.getElementById('btnStartAll').disabled = running;
-  document.getElementById('btnResumeVision').disabled = running;
-  document.getElementById('btnStop').disabled = !running;
+  const btnStartAll = document.getElementById('btnStartAll');
+  const btnResumeVision = document.getElementById('btnResumeVision');
+  const btnStop = document.getElementById('btnStop');
+  if (btnStartAll) btnStartAll.disabled = running;
+  if (btnResumeVision) btnResumeVision.disabled = running;
+  if (btnStop) btnStop.disabled = !running;
+  document.querySelectorAll('.stage-run-btn').forEach(btn => {
+    btn.disabled = running;
+  });
 
   document.getElementById('teleStage').innerText = s.stage || 'idle';
   document.getElementById('teleRam').innerText = s.llama_rss_mb ? `${Math.round(s.llama_rss_mb)} MB` : 'Idle';
@@ -146,11 +184,13 @@ function renderPipelineState(s) {
   document.getElementById('progressRate').innerText = s.rate_img_s ? `${s.rate_img_s} img/s` : '';
 
   if (s.pull && s.pull.running) {
-    const pct = s.pull.total ? ` (${Math.round((s.pull.completed / s.pull.total) * 100)}%)` : '';
-    document.getElementById('diagOllamaSub').innerText = `Pulling model: ${s.pull.status}${pct}`;
+    const pullPct = s.pull.total ? ` (${Math.round((s.pull.completed / s.pull.total) * 100)}%)` : '';
+    const olSub = document.getElementById('diagOllamaSub');
+    if (olSub) olSub.innerText = `Pulling model: ${s.pull.status}${pullPct}`;
   }
   if (s.bio_install && s.bio_install.running) {
-    document.getElementById('diagBioSub').innerText = s.bio_install.status || 'Installing Face AI...';
+    const bioSub = document.getElementById('diagBioSub');
+    if (bioSub) bioSub.innerText = s.bio_install.status || 'Installing Face AI...';
   }
 
   if (s.archive) renderArchiveMetrics(s.archive);
@@ -164,12 +204,14 @@ async function startOllama() {
 
 async function pullMoondream() {
   await fetch('/api/setup/pull-model', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model: 'moondream:latest' }) });
-  document.getElementById('diagOllamaSub').innerText = 'Downloading moondream:latest in background...';
+  const olSub = document.getElementById('diagOllamaSub');
+  if (olSub) olSub.innerText = 'Downloading moondream:latest in background...';
 }
 
 async function installBiometrics() {
   await fetch('/api/setup/install-biometrics', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
-  document.getElementById('diagBioSub').innerText = 'Installing InsightFace & ONNX Runtime in background...';
+  const bioSub = document.getElementById('diagBioSub');
+  if (bioSub) bioSub.innerText = 'Installing InsightFace & ONNX Runtime in background...';
 }
 
 function toggleReclusterWarning() {
@@ -180,16 +222,22 @@ function toggleReclusterWarning() {
   }
 }
 
-async function startPipeline(stages = null) {
+async function startPipeline(stages = null, opts = {}) {
   const archivePath = document.getElementById('archivePath').value.trim();
   if (!archivePath) { alert('Please select or enter an archive folder first.'); return; }
   const sourceDirs = getSelectedSourceDirs();
-  if (currentMode === 'safe_copy' && sourceDirs.length === 0) {
+  if (currentMode === 'safe_copy' && sourceDirs.length === 0 && (!stages || stages.includes('stage1'))) {
     alert('Safe Copy Mode requires selecting a Source Photos Folder to copy from.');
     return;
   }
   const reprocess = Boolean(document.getElementById('chkReprocess')?.checked);
   const recluster = Boolean(document.getElementById('chkRecluster')?.checked);
+  const chkBio = Boolean(document.getElementById('chkBiometrics')?.checked);
+  const chkVis = Boolean(document.getElementById('chkVision')?.checked);
+
+  const enableBiometrics = opts.forceBiometrics ? true : chkBio;
+  const enableVision = opts.forceVision ? true : chkVis;
+
   const res = await fetch('/api/pipeline/start', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -198,8 +246,8 @@ async function startPipeline(stages = null) {
       source_dirs: sourceDirs,
       mode: currentMode,
       speed_mode: currentSpeed,
-      enable_biometrics: document.getElementById('chkBiometrics').checked,
-      enable_vision: document.getElementById('chkVision').checked,
+      enable_biometrics: enableBiometrics,
+      enable_vision: enableVision,
       reprocess: reprocess,
       recluster: recluster,
       stages: stages
@@ -210,11 +258,25 @@ async function startPipeline(stages = null) {
     alert(data.error || 'Could not start pipeline.');
     return;
   }
+  if (opts.label) {
+    document.getElementById('progressMsg').innerText = `Starting ${opts.label}...`;
+  }
   if (data.status) renderPipelineState(data.status);
 }
 
+function runSpecificStages(stages, label = '') {
+  const stageList = Array.isArray(stages) ? stages : [stages];
+  const needsBio = stageList.includes('stage4_faces') || stageList.includes('stage4_cluster');
+  const needsVis = stageList.includes('stage4_vision');
+  startPipeline(stageList, {
+    label,
+    forceBiometrics: needsBio,
+    forceVision: needsVis
+  });
+}
+
 function startVisionOnly() {
-  startPipeline(['stage4_vision', 'stage5']);
+  runSpecificStages(['stage4_vision', 'stage5'], 'Vision AI Captioning & Homework Scan');
 }
 
 async function stopPipeline() {
@@ -276,7 +338,7 @@ function renderPeopleModalData(clusters) {
     if (mergeBtn) mergeBtn.disabled = true;
     if (saveBtn) saveBtn.disabled = true;
     if (countLbl) countLbl.innerText = '0 clusters indexed';
-    tbody.innerHTML = '<tr><td colspan="4" class="muted-inline" style="text-align: center; padding: 24px;">No face clusters found yet. Run Stage 4A biometrics first.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="4" class="muted-inline" style="text-align: center; padding: 24px;">No face clusters found yet. Run Stage 4A Face Detection first.</td></tr>';
     return;
   }
 
@@ -409,6 +471,16 @@ window.addEventListener('keydown', (e) => {
 });
 
 window.addEventListener('DOMContentLoaded', async () => {
+  const archiveInput = document.getElementById('archivePath');
+  if (archiveInput) {
+    archiveInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        runPreflight();
+      }
+    });
+  }
+
   const statusRes = await fetch('/api/status');
   const status = await statusRes.json();
   if (status.selected_archive) {

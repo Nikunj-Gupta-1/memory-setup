@@ -10,7 +10,7 @@ import numpy as np
 from PIL import Image
 
 from memory_setup.config import ArchiveContext
-from memory_setup.db import get_connection
+from memory_setup.db import get_connection, init_db, record_checkpoint
 
 
 def cluster_embeddings(
@@ -158,6 +158,26 @@ def _generate_cluster_avatars(
     return avatars_generated
 
 
+def _finalize_clustering(ctx: ArchiveContext, conn: Any, stats: Dict[str, Any]) -> Dict[str, Any]:
+    """Write Stage 4 clustering report, update unified SQLite `checkpoints`, and close `conn`."""
+    ctx.reports_dir.mkdir(parents=True, exist_ok=True)
+    report_path = ctx.reports_dir / "stage4_clustering_report.json"
+    report_path.write_text(json.dumps(stats, indent=2), encoding="utf-8")
+    total_vectors = int(stats.get("total_vectors") or 0)
+    record_checkpoint(
+        conn,
+        "stage4_clustering",
+        total_vectors,
+        total_vectors,
+        0,
+        ctx.to_rel(report_path),
+        stats,
+    )
+    conn.commit()
+    conn.close()
+    return stats
+
+
 def cluster_and_generate_avatars(
     ctx: ArchiveContext,
     thresh: Optional[float] = None,
@@ -174,6 +194,7 @@ def cluster_and_generate_avatars(
     new IDs above `MAX(cluster_id)`.
     """
     do_recluster = ctx.recluster if recluster is None else recluster
+    init_db(ctx.db_path)
     conn = get_connection(ctx.db_path)
     cursor = conn.cursor()
 
@@ -219,16 +240,19 @@ def cluster_and_generate_avatars(
                 cursor.execute("SELECT COUNT(DISTINCT cluster_id) FROM people_faces WHERE cluster_id >= 0").fetchone()[0]
                 or 0
             )
-            conn.close()
-            return {
-                "status": "complete",
-                "total_vectors": total_vectors,
-                "new_faces_clustered": 0,
-                "recurring_clusters": recurring_clusters,
-                "preserved_existing": True,
-                "avatars_generated": avatars_generated,
-                "elapsed_seconds": round(time.time() - t0, 2),
-            }
+            return _finalize_clustering(
+                ctx,
+                conn,
+                {
+                    "status": "complete",
+                    "total_vectors": total_vectors,
+                    "new_faces_clustered": 0,
+                    "recurring_clusters": recurring_clusters,
+                    "preserved_existing": True,
+                    "avatars_generated": avatars_generated,
+                    "elapsed_seconds": round(time.time() - t0, 2),
+                },
+            )
 
         centroid_sums: Dict[int, np.ndarray] = {}
         cluster_counts: Dict[int, int] = {}
@@ -327,26 +351,28 @@ def cluster_and_generate_avatars(
             cursor.execute("SELECT COUNT(DISTINCT cluster_id) FROM people_faces WHERE cluster_id >= 0").fetchone()[0]
             or 0
         )
-        conn.close()
-        return {
-            "status": "complete",
-            "total_vectors": total_vectors,
-            "dim": dim,
-            "threshold": eff_thresh,
-            "new_faces_clustered": len(assignments),
-            "new_clusters_created": new_clusters_created,
-            "recurring_clusters": recurring_clusters,
-            "preserved_existing": True,
-            "avatars_generated": avatars_generated,
-            "elapsed_seconds": round(time.time() - t0, 2),
-        }
+        return _finalize_clustering(
+            ctx,
+            conn,
+            {
+                "status": "complete",
+                "total_vectors": total_vectors,
+                "dim": dim,
+                "threshold": eff_thresh,
+                "new_faces_clustered": len(assignments),
+                "new_clusters_created": new_clusters_created,
+                "recurring_clusters": recurring_clusters,
+                "preserved_existing": True,
+                "avatars_generated": avatars_generated,
+                "elapsed_seconds": round(time.time() - t0, 2),
+            },
+        )
 
     rows = cursor.execute(
         "SELECT face_id, embedding FROM people_faces WHERE embedding IS NOT NULL"
     ).fetchall()
     if not rows:
-        conn.close()
-        return {"status": "empty", "total_vectors": 0, "recurring_clusters": 0}
+        return _finalize_clustering(ctx, conn, {"status": "empty", "total_vectors": 0, "recurring_clusters": 0})
 
     face_ids = [r[0] for r in rows]
     embs = [np.frombuffer(r[1], dtype=np.float32) for r in rows]
@@ -368,8 +394,7 @@ def cluster_and_generate_avatars(
         ctx, cursor, target_cids, dim=dim, overwrite=do_recluster
     )
 
-    conn.close()
     stats["avatars_generated"] = avatars_generated
     stats["preserved_existing"] = False
     stats["elapsed_seconds"] = round(time.time() - t0, 2)
-    return stats
+    return _finalize_clustering(ctx, conn, stats)

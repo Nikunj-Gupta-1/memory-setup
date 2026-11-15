@@ -87,7 +87,15 @@ def run_biometric_face_scan(
             ctx.reports_dir.mkdir(parents=True, exist_ok=True)
             report_path = ctx.reports_dir / "stage4_faces_report.json"
             report_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
-            record_checkpoint(conn, "stage4_faces", len(rows), scanned_count, 0, str(report_path), summary)
+            record_checkpoint(
+                conn,
+                "stage4_faces",
+                len(rows),
+                scanned_count,
+                0,
+                ctx.to_rel(report_path),
+                summary,
+            )
             conn.commit()
         conn.close()
         return summary
@@ -204,7 +212,7 @@ def run_biometric_face_scan(
         ctx.reports_dir.mkdir(parents=True, exist_ok=True)
         report_path = ctx.reports_dir / "stage4_faces_report.json"
         report_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
-        record_checkpoint(conn, "stage4_faces", len(rows), len(rows), 0, str(report_path), summary)
+        record_checkpoint(conn, "stage4_faces", len(rows), len(rows), 0, ctx.to_rel(report_path), summary)
         conn.commit()
     conn.close()
     return summary
