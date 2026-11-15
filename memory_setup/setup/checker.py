@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import ipaddress
 import json
 import os
 import platform
+import re
 import shutil
 import socket
 import subprocess
@@ -234,6 +236,34 @@ def _find_tailscale_binary() -> Optional[str]:
     return None
 
 
+def _detect_tailscale_interface_ip() -> Optional[str]:
+    """Inspect active network interfaces for an IPv4 address in Tailscale's CGNAT range (100.64.0.0/10)."""
+    cmd = ["ipconfig"] if platform.system() == "Windows" else ["ifconfig"]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=2)
+    except Exception:
+        return None
+    cgnat = ipaddress.ip_network("100.64.0.0/10")
+    for match in re.findall(r"\b(100\.\d{1,3}\.\d{1,3}\.\d{1,3})\b", proc.stdout or ""):
+        try:
+            addr = ipaddress.ip_address(match)
+        except ValueError:
+            continue
+        if addr in cgnat:
+            return str(addr)
+    return None
+
+
+def _pick_ipv4(candidates: Any) -> Optional[str]:
+    if not isinstance(candidates, list):
+        return None
+    for item in candidates:
+        s = str(item or "").strip()
+        if "." in s and ":" not in s:
+            return s
+    return None
+
+
 def check_tailscale_status() -> Dict[str, Any]:
     """Inspect local Tailscale installation, tunnel state, Tailscale IP, and MagicDNS name."""
     bin_path = _find_tailscale_binary()
@@ -242,12 +272,28 @@ def check_tailscale_status() -> Dict[str, Any]:
         "binary_path": bin_path,
         "backend_state": "NotInstalled" if bin_path is None else "Unknown",
         "running": False,
+        "connected": False,
         "ipv4": None,
+        "tailscale_ip": None,
         "dns_name": None,
         "hostname": None,
+        "message": "Tailscale not installed (optional for remote access)",
         "error": None,
     }
     if not bin_path:
+        iface_ip = _detect_tailscale_interface_ip()
+        if iface_ip:
+            info.update(
+                {
+                    "installed": True,
+                    "backend_state": "Running",
+                    "running": True,
+                    "connected": True,
+                    "ipv4": iface_ip,
+                    "tailscale_ip": iface_ip,
+                    "message": f"Tailscale VPN connected ({iface_ip})",
+                }
+            )
         return info
 
     try:
@@ -260,21 +306,46 @@ def check_tailscale_status() -> Dict[str, Any]:
         raw = (proc.stdout or "").strip()
         if not raw:
             info["backend_state"] = "Stopped"
+            info["message"] = "Tailscale installed (Disconnected — open Tailscale to connect)"
             return info
         data = json.loads(raw)
         state = str(data.get("BackendState") or "Stopped")
-        info["backend_state"] = state
-        info["running"] = state.lower() == "running"
-        ips = data.get("TailscaleIPs") or []
-        for ip in ips:
-            if "." in str(ip):
-                info["ipv4"] = str(ip)
-                break
+        is_connected = state.lower() == "running"
         self_info = data.get("Self") or {}
+        ipv4 = (
+            _pick_ipv4(data.get("TailscaleIPs"))
+            or _pick_ipv4(self_info.get("TailscaleIPs"))
+            or (_detect_tailscale_interface_ip() if is_connected else None)
+        )
+        info["backend_state"] = state
+        info["running"] = is_connected
+        info["connected"] = is_connected
+        info["ipv4"] = ipv4
+        info["tailscale_ip"] = ipv4
         if self_info.get("DNSName"):
             info["dns_name"] = str(self_info["DNSName"]).rstrip(".")
         if self_info.get("HostName"):
             info["hostname"] = str(self_info["HostName"])
+        if is_connected:
+            info["message"] = f"Tailscale VPN connected ({ipv4})" if ipv4 else "Tailscale VPN connected"
+        elif state.lower() == "needslogin":
+            info["message"] = "Tailscale needs sign-in (open Tailscale app to log in)"
+        else:
+            info["message"] = "Tailscale installed (Disconnected — open Tailscale to connect)"
     except Exception as exc:
         info["error"] = str(exc)
+        iface_ip = _detect_tailscale_interface_ip()
+        if iface_ip:
+            info.update(
+                {
+                    "backend_state": "Running",
+                    "running": True,
+                    "connected": True,
+                    "ipv4": iface_ip,
+                    "tailscale_ip": iface_ip,
+                    "message": f"Tailscale VPN connected ({iface_ip})",
+                }
+            )
+        else:
+            info["message"] = "Tailscale installed (unable to query status)"
     return info

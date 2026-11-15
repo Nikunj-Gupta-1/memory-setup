@@ -179,6 +179,10 @@ class _SharedMuseumHTTPServer(socketserver.ThreadingTCPServer):
     daemon_threads = True
     block_on_close = False
 
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        self.museum_shutdown_event = threading.Event()
+        super().__init__(*args, **kwargs)
+
 
 class MuseumShareManager:
     """Manage password configuration and optional background Museum Viewer sharing."""
@@ -303,6 +307,11 @@ class MuseumShareManager:
             self._thread = None
             self._archive_root = None
         if httpd is not None:
+            evt = getattr(httpd, "museum_shutdown_event", None)
+            if isinstance(evt, threading.Event):
+                evt.set()
+            httpd.museum_session_secret = secrets.token_bytes(32)  # type: ignore[attr-defined]
+            time.sleep(0.30)
             try:
                 httpd.shutdown()
             except Exception:
@@ -508,6 +517,42 @@ def create_app_server(
                 self.send_header("Set-Cookie", "museum_session=; Path=/; Max-Age=0; SameSite=Lax; HttpOnly")
                 self.send_header("Location", "/archive/viewer/viewer.html")
                 self.end_headers()
+                return
+
+            if path == "/__museum_ping":
+                shutdown_evt: Optional[threading.Event] = getattr(
+                    self.server, "shutdown_event", None
+                )
+                if shutdown_evt is not None and shutdown_evt.is_set():
+                    self._send_json(401, {"ok": False, "locked": True, "reason": "session_ended"})
+                else:
+                    self._send_json(200, {"ok": True, "locked": False, "local": True})
+                return
+
+            if path == "/__museum_events":
+                self.close_connection = True
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.send_header("Cache-Control", "no-cache")
+                self.send_header("Connection", "close")
+                self.end_headers()
+                shutdown_evt = getattr(self.server, "shutdown_event", None)
+                try:
+                    self.wfile.write(b": connected\n\n")
+                    self.wfile.flush()
+                    while shutdown_evt is None or not shutdown_evt.is_set():
+                        if shutdown_evt is not None:
+                            if shutdown_evt.wait(10.0):
+                                break
+                        else:
+                            time.sleep(10.0)
+                        self.wfile.write(b": keepalive\n\n")
+                        self.wfile.flush()
+                    if shutdown_evt is not None and shutdown_evt.is_set():
+                        self.wfile.write(b'event: logout\ndata: {"reason": "server_stopped"}\n\n')
+                        self.wfile.flush()
+                except (BrokenPipeError, ConnectionResetError, OSError):
+                    return
                 return
 
             if path == "/api/status":

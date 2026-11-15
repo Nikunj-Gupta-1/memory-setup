@@ -395,6 +395,27 @@ def test_control_center_remote_share_ui_and_lifecycle(tmp_path: Path) -> None:
             assert resp.status == 200
             assert b"lockMuseumBtn" in resp.read()
 
+        # Connected viewer subscribing to /__museum_events receives instant logout when server stops
+        sse_connected = threading.Event()
+        sse_logout_seen = threading.Event()
+
+        def _watch_events() -> None:
+            with opener.open(f"{share_base}/__museum_events", timeout=5) as resp:
+                while True:
+                    line = resp.readline()
+                    if not line:
+                        break
+                    text = line.decode("utf-8", errors="ignore")
+                    if ": connected" in text:
+                        sse_connected.set()
+                    if "event: logout" in text:
+                        sse_logout_seen.set()
+                        break
+
+        sse_thread = threading.Thread(target=_watch_events, daemon=True)
+        sse_thread.start()
+        assert sse_connected.wait(timeout=3.0)
+
         # Stop Remote Museum Server via GUI API
         stop_res = _post_json(
             f"{base}/api/share/stop",
@@ -402,6 +423,8 @@ def test_control_center_remote_share_ui_and_lifecycle(tmp_path: Path) -> None:
         )
         assert stop_res["ok"] is True
         assert stop_res["share"]["running"] is False
+        assert sse_logout_seen.wait(timeout=3.0)
+        sse_thread.join(timeout=2.0)
 
         # Control Center /__museum_logout route avoids 404 when previewed locally
         class _NoRedirect(urllib.request.HTTPRedirectHandler):

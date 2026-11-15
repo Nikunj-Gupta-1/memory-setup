@@ -2,7 +2,7 @@
 
 **Target Repository**: `Memory_Setup/`  
 **Current Milestone**: Implemented Architecture & Reference Design  
-**Status**: Completed & Verified (`42/42` pytest checks passing)  
+**Status**: Completed & Verified (`44/44` pytest checks passing)  
 
 ---
 
@@ -364,7 +364,7 @@ All unit tests run on synthetic in-memory fixtures without loading large neural 
 cd Memory_Setup
 .venv/bin/pytest tests/ -v
 ```
-- `test_checker.py`: Verifies Ollama connectivity mock and missing-tool diagnostics.
+- `test_checker.py`: Verifies Ollama connectivity mock, missing-tool diagnostics, and Tailscale `connected`/`tailscale_ip` + CGNAT interface fallback detection.
 - `test_sniffer.py`: Verifies magic-byte detection across corrupt file headers.
 - `test_companions.py`: Validates Live Photo pairing logic using mocked metadata.
 - `test_geocoder.py`: Verifies offline coordinate resolution (e.g. Paris, Tokyo, New York).
@@ -372,8 +372,8 @@ cd Memory_Setup
 - `test_document_classifier.py`: Validates document precision against known adversarial cases (birthday cakes, t-shirts with text, people on benches, versus real math worksheets).
 - `test_memory_bounded_client.py`: Verifies that `LLAMA_ARG_CACHE_RAM=0` and 200-item model recycling parameters are passed to Ollama requests.
 - `test_museum_builder.py`: Verifies anti-clobber guarantee (ensures `viewer.html` is never overwritten on data re-exports).
-- `test_video_viewer_and_server.py`: Verifies `ALL_VIDEOS` export, HTTP `206` Range streaming, `share_config.json` password loading & `403` download protection, strict `401` pre-login CSP (`default-src 'none'`), and `/__museum_logout`.
-- `test_gui_api.py`: Verifies Control Center HTTP/SSE endpoints, `/api/share/*` password & Tailscale sharing lifecycle, platform icons, and clean SSE shutdown.
+- `test_video_viewer_and_server.py`: Verifies `ALL_VIDEOS` export, HTTP `206` Range streaming, `share_config.json` password loading & `403` download protection, strict `401` pre-login CSP (`default-src 'none'`), `/__museum_logout`, `/__museum_ping`, and mobile-responsive viewer markers.
+- `test_gui_api.py`: Verifies Control Center HTTP/SSE endpoints, `/api/share/*` password & Tailscale sharing lifecycle (including instant `event: logout` broadcast when stopping), platform icons, and clean SSE shutdown.
 
 ### Manual Verification
 1. **Launch Setup Guide**:

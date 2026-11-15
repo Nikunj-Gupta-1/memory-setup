@@ -24,8 +24,8 @@ Built and battle-tested on a real **33,771-file personal archive (2007–2026)**
   * Isolates math notebooks, worksheets, receipts, and code screenshots while disqualifying photos with detected faces or celebration scenes (birthday cakes, weddings, churches, dining tables).
 * **Offline Spatial Reverse-Geocoder**:
   * `scipy.spatial.cKDTree` over 3D ECEF coordinates with a strict `150.0 km` Haversine cutoff so remote ocean coordinates never false-match distant coastal cities.
-* **Offline Video Cinema & Read-Only Dual-Theme Museum UI (With Zero-Terminal Remote Password Gate)**:
-  * Interactive read-only `viewer.html` (Warm Archival Daylight & Darkroom themes) with keyboard-navigable lightbox across both Photos and **Videos** (`ALL_VIDEOS`), HTTP `206` byte-range video streaming in `server.py` and the Control Center, Live Photo clip toggles, **People** & **World Map** filtering, **Open in System Player** (`/api/open-media`) + download fallbacks for legacy `.avi` clips, read-only `/api/search` FTS5 endpoint, a **🔒 Lock** (`/__museum_logout`) session button in the header, and zero-terminal password + port setup inside the Control Center's **Remote Family Share** tab (`share_config.json` + strict `401` `Content-Security-Policy: default-src 'none'` pre-login gate so zero HTML/scripts/photos/videos load before login).
+* **Offline Video Cinema & Mobile-Responsive Read-Only Museum UI (With Zero-Terminal Remote Password Gate)**:
+  * Interactive read-only `viewer.html` (Warm Archival Daylight & Darkroom themes, plus dedicated mobile/phone `@media (max-width: 640px)` 2-column grids, zoom-safe `16px` search/select controls, and touch-swipe lightbox navigation) across both Photos and **Videos** (`ALL_VIDEOS`), HTTP `206` byte-range video streaming in `server.py` and the Control Center, Live Photo clip toggles, **People** & **World Map** filtering, **Open in System Player** (`/api/open-media`) + download fallbacks for legacy `.avi` clips, read-only `/api/search` FTS5 endpoint, a **🔒 Lock** (`/__museum_logout`) button that wipes loaded data immediately, and zero-terminal password + port setup inside the Control Center's **Remote Family Share** tab (`share_config.json` + strict `401` `Content-Security-Policy: default-src 'none'` pre-login gate + instant `/__museum_events` & `/__museum_ping` auto-logout across all connected devices the moment the server stops).
 * **Incremental Re-Run Safe & Consolidated Single-Schema SQLite**:
   * Drop new photo/video folders into an existing archive and re-run **Organize & Build Museum** (or trigger individual stages in **Stage-by-Stage Runner**): all stages share one consolidated `viewer/catalog.sqlite` schema (no duplicate per-stage tables), runtime scripts/DB files at archive root are ignored, exact duplicates are caught cleanly, only new media enters Stages 1–4B, and existing AI captions, custom people names, and merged clusters are preserved unless **Force Reprocess Existing Media** (`--reprocess`) or **Force Full Face Re-Cluster** (`--recluster`) is checked in the Control Center Studio.
 * **Anti-Clobber Museum Protection & 15.0 GiB Disk Safety Floor**:
@@ -58,7 +58,7 @@ Memory_Setup/
 │       ├── start_viewer.command   # 1-click archive museum launcher
 │       └── *.md                   # Manifesto, Progress Report, System Ledger & Handoff
 ├── scripts/                       # Native macOS universal launcher C source
-├── tests/                         # 42 unit & integration tests (offline/mocked VLM)
+├── tests/                         # 44 unit & integration tests (offline/mocked VLM)
 ├── pyproject.toml
 ├── Memory Setup.app/              # 1-click zero-Terminal macOS app bundle
 ├── Start_Memory_Setup.command     # macOS setup, --rebuild-app & detached launcher
@@ -132,8 +132,8 @@ You can share **only the read-only Offline Museum Viewer** (`viewer.html` + `/ap
 1. Open the **Remote Family Share** tab in the Control Center sidebar.
 2. Enter a family password under **Password Lock & Port Setup** and click **Save Password & Port** (saved locally in `archive/viewer/share_config.json`, ignored by Git and blocked from HTTP downloads).
    * Unauthenticated requests receive only an inline login gate (`401` + `Content-Security-Policy: default-src 'none'`). Not a single byte of `viewer.html`, `catalog_data.js`, thumbnails, photos, or videos loads until the password is entered. Visitors can click **🔒 Lock** in the top-right bar of `viewer.html` to end their session anytime.
-3. Click **Open Tailscale App** and connect Tailscale on this machine (`tailscale.com/download`), then click **Start Remote Museum Server**.
-4. Copy the generated **Tailscale Private IP Link** (or share your machine cleanly in Tailscale Admin Console → **Share…** for external family accounts) and send it with the password. (Headless servers can alternatively launch `server.py --host 127.0.0.1 --port 8080 --read-only --no-browser` with `MUSEUM_PASSWORD=...` behind `tailscale serve` or Cloudflare Tunnel.)
+3. Click **Open Tailscale App** and connect Tailscale on this machine (`tailscale.com/download`) — the Control Center polls Tailscale status automatically (including interface `100.x.y.z` fallback) and fills in your **Tailscale Private IP Link** — then click **Start Remote Museum Server**.
+4. Copy the generated **Tailscale Private IP Link** (or share your machine cleanly in Tailscale Admin Console → **Share…** for external family accounts) and open it on any phone or desktop browser. Clicking **🛑 Stop Remote Server** in the Control Center immediately broadcasts an SSE/heartbeat logout signal that locks every open browser/phone and wipes loaded media from the screen right away. (Headless servers can alternatively launch `server.py --host 127.0.0.1 --port 8080 --read-only --no-browser` with `MUSEUM_PASSWORD=...` behind `tailscale serve` or Cloudflare Tunnel.)
 
 <details>
 <summary>Optional Headless CLI Commands (Advanced Users)</summary>

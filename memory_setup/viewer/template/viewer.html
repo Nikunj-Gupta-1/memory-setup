@@ -2,7 +2,7 @@
 <html lang="en" data-theme="light">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>Family Memory Archive — Offline Museum</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script>
@@ -86,6 +86,7 @@
       display: flex;
       flex-direction: column;
       height: 100vh;
+      height: 100dvh;
       overflow: hidden;
       -webkit-font-smoothing: antialiased;
       font-variant-numeric: tabular-nums;
@@ -204,7 +205,10 @@
       gap: 6px;
       flex-shrink: 0;
       overflow-x: auto;
+      scrollbar-width: none;
     }
+
+    nav.tabs::-webkit-scrollbar { display: none; }
 
     .tab-btn {
       background: transparent;
@@ -1035,6 +1039,75 @@
       header.masthead, nav.tabs, .control-bar, .grid-wrap, .section-shell { padding-left: 16px; padding-right: 16px; }
       .notice-banner { margin: 16px 16px 0; }
     }
+
+    @media (max-width: 640px) {
+      header.masthead { padding: 10px 12px; gap: 8px; }
+      .tab-pane { -webkit-overflow-scrolling: touch; }
+      #map { min-height: 280px; }
+      .stat-strip { display: none; }
+      .brand-lockup { gap: 10px; min-width: 0; flex: 1; }
+      .brand-mark { width: 32px; height: 32px; }
+      .brand-title { font-size: 1.05rem; }
+      .brand-sub { font-size: 0.66rem; }
+      .masthead-right { gap: 6px; flex-shrink: 0; }
+      #themeLabel { display: none; }
+      .theme-toggle { padding: 6px 10px; font-size: 0.78rem; }
+      nav.tabs { padding: 0 8px; gap: 2px; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+      nav.tabs::-webkit-scrollbar { display: none; }
+      .tab-btn { padding: 10px 11px; font-size: 0.8rem; gap: 5px; }
+      .control-bar { padding: 8px 12px; gap: 8px; }
+      .search-field { flex: 1 1 100%; min-width: 0; }
+      .kbd-hint { display: none; }
+      .search-input, .select-ctrl { font-size: 16px; padding: 8px 12px; }
+      .select-ctrl { flex: 1 1 calc(50% - 6px); min-width: 0; }
+      .chip-group {
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        max-width: 100%;
+        scrollbar-width: none;
+        padding-bottom: 2px;
+      }
+      .chip-group::-webkit-scrollbar { display: none; }
+      .filter-chip { flex-shrink: 0; }
+      .result-status { font-size: 0.75rem; width: 100%; margin-left: 0; }
+      .grid-wrap, #photoGrid, #videoGrid, #homeworkGrid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+        padding: 12px 12px 28px;
+      }
+      .card-info { padding: 8px 10px; gap: 4px; }
+      .card-title { font-size: 0.78rem; -webkit-line-clamp: 1; }
+      .card-meta { font-size: 0.68rem; }
+      .card-date-pill { font-size: 0.64rem; padding: 2px 6px; top: 6px; left: 6px; }
+      .video-play-orb { width: 40px; height: 40px; }
+      .people-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+      .person-avatar { width: 72px; height: 72px; }
+      .section-shell { padding: 14px 12px 28px; }
+      .notice-banner { margin: 12px 12px 0; padding: 12px 14px; }
+      #lightbox { padding: 0; }
+      .lightbox-panel {
+        width: 100vw;
+        height: 100vh;
+        height: 100dvh;
+        border-radius: 0;
+        border: none;
+        grid-template-columns: 1fr;
+        grid-template-rows: minmax(220px, 54dvh) 1fr;
+      }
+      .lb-stage { padding: 12px 8px; }
+      .lb-nav-prev { left: 8px; }
+      .lb-nav-next { right: 8px; }
+      .close-btn {
+        top: 10px;
+        right: 10px;
+        width: 38px;
+        height: 38px;
+        background: rgba(17, 16, 14, 0.75);
+        color: #F6F3EC;
+      }
+      .lb-sidebar { padding: 14px 16px 28px; gap: 12px; }
+      .lb-title { font-size: 1.05rem; }
+    }
   </style>
 </head>
 <body>
@@ -1065,7 +1138,7 @@
         <span id="themeIcon">🌙</span>
         <span id="themeLabel">Darkroom</span>
       </button>
-      <a id="lockMuseumBtn" class="theme-toggle" href="/__museum_logout" title="Lock museum and return to password screen" style="text-decoration: none;">
+      <a id="lockMuseumBtn" class="theme-toggle" href="/__museum_logout" onclick="return handleManualLock(event)" title="Lock museum and return to password screen" style="text-decoration: none;">
         <span>🔒</span>
         <span>Lock</span>
       </a>
@@ -1409,6 +1482,8 @@
 
     window.addEventListener('DOMContentLoaded', () => {
       syncThemeControls(document.documentElement.getAttribute('data-theme') || 'light');
+      initLiveSessionGuard();
+      setupTouchSwipe();
 
       const photos = typeof ALL_PHOTOS !== 'undefined' ? ALL_PHOTOS : null;
       const videos = typeof ALL_VIDEOS !== 'undefined' ? ALL_VIDEOS : [];
@@ -2027,6 +2102,146 @@
         `);
       });
       setTimeout(() => map.invalidateSize(), 200);
+    }
+
+    /* ---------- LIVE SESSION LOCK & TOUCH SWIPE ---------- */
+    window.__museumLockedOut = false;
+    let _museumEventSource = null;
+    let _museumPingTimer = null;
+    let _museumMissedPings = 0;
+    let _museumSseErrored = false;
+
+    function triggerRemoteLogout(reason = 'session_ended') {
+      if (window.__museumLockedOut) return;
+      window.__museumLockedOut = true;
+
+      if (_museumEventSource) {
+        try { _museumEventSource.close(); } catch (_) {}
+        _museumEventSource = null;
+      }
+      if (_museumPingTimer) {
+        clearInterval(_museumPingTimer);
+        _museumPingTimer = null;
+      }
+
+      try { resetLightboxMedia(); } catch (_) {}
+      try {
+        const lb = document.getElementById('lightbox');
+        if (lb) lb.classList.remove('active');
+      } catch (_) {}
+
+      if (typeof ALL_PHOTOS !== 'undefined' && Array.isArray(ALL_PHOTOS)) ALL_PHOTOS.length = 0;
+      if (typeof ALL_VIDEOS !== 'undefined' && Array.isArray(ALL_VIDEOS)) ALL_VIDEOS.length = 0;
+      filteredPhotos = [];
+      filteredVideos = [];
+      allHomework = [];
+      filteredHomework = [];
+      currentVideoItem = null;
+
+      try {
+        fetch('/__museum_logout', { method: 'POST', credentials: 'same-origin', keepalive: true }).catch(() => {});
+      } catch (_) {}
+
+      const isManual = reason === 'manual_lock';
+      const heading = isManual ? 'Museum Session Locked' : 'Museum Session Ended';
+      const detail = isManual
+        ? 'All loaded photos, videos, and captions have been cleared from this device.'
+        : 'The host stopped sharing or locked the Museum Server. All loaded media was cleared automatically from this screen.';
+
+      document.body.innerHTML = `
+        <div id="museumRemoteLockScreen" style="min-height:100vh;min-height:100dvh;width:100%;display:grid;place-items:center;padding:24px;background:#070b14;color:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Inter','Segoe UI',sans-serif;">
+          <div style="width:min(420px,100%);background:#111827;border:1px solid rgba(148,163,184,0.24);border-radius:18px;padding:28px;text-align:center;box-shadow:0 24px 60px rgba(0,0,0,0.65);">
+            <div style="width:52px;height:52px;margin:0 auto 14px;border-radius:50%;display:grid;place-items:center;background:rgba(99,102,241,0.16);border:1px solid rgba(99,102,241,0.35);font-size:22px;">🔒</div>
+            <h1 style="font-size:1.25rem;font-weight:700;margin-bottom:8px;">${escapeHtml(heading)}</h1>
+            <p style="font-size:0.88rem;color:#94a3b8;line-height:1.55;margin-bottom:20px;">${escapeHtml(detail)}</p>
+            <button type="button" onclick="window.location.replace(window.location.pathname)" style="width:100%;padding:11px 16px;border:0;border-radius:10px;cursor:pointer;font-weight:600;font-size:0.95rem;color:#ffffff;background:linear-gradient(135deg,#6366f1,#3b82f6);">Reconnect / Sign In</button>
+          </div>
+        </div>
+      `;
+    }
+
+    function handleManualLock(e) {
+      if (e) e.preventDefault();
+      triggerRemoteLogout('manual_lock');
+      setTimeout(() => {
+        try { window.location.replace('/__museum_logout'); } catch (_) {}
+      }, 120);
+      return false;
+    }
+
+    async function checkMuseumSessionNow() {
+      if (window.__museumLockedOut || !window.location.protocol.startsWith('http')) return;
+      const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+      const timer = ctrl ? setTimeout(() => ctrl.abort(), 2000) : null;
+      try {
+        const res = await fetch('/__museum_ping', {
+          cache: 'no-store',
+          credentials: 'same-origin',
+          signal: ctrl ? ctrl.signal : undefined
+        });
+        if (timer) clearTimeout(timer);
+        if (res.status === 401 || res.status === 403) {
+          triggerRemoteLogout('unauthorized');
+          return;
+        }
+        if (res.ok) {
+          _museumMissedPings = 0;
+        }
+      } catch (_) {
+        if (timer) clearTimeout(timer);
+        _museumMissedPings += 1;
+        if (_museumMissedPings >= 2 || (_museumSseErrored && _museumMissedPings >= 1)) {
+          triggerRemoteLogout('server_stopped');
+        }
+      }
+    }
+
+    function initLiveSessionGuard() {
+      if (!window.location.protocol.startsWith('http')) return;
+      if (typeof EventSource !== 'undefined') {
+        try {
+          const es = new EventSource('/__museum_events');
+          _museumEventSource = es;
+          es.addEventListener('logout', () => {
+            triggerRemoteLogout('server_stopped');
+          });
+          es.onopen = () => {
+            _museumSseErrored = false;
+            _museumMissedPings = 0;
+          };
+          es.onerror = () => {
+            _museumSseErrored = true;
+            checkMuseumSessionNow();
+          };
+        } catch (_) {}
+      }
+      _museumPingTimer = setInterval(checkMuseumSessionNow, 2500);
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') checkMuseumSessionNow();
+      });
+      window.addEventListener('pageshow', checkMuseumSessionNow);
+    }
+
+    function setupTouchSwipe() {
+      const stage = document.querySelector('.lb-stage');
+      if (!stage) return;
+      let startX = 0;
+      let startY = 0;
+      stage.addEventListener('touchstart', (e) => {
+        if (e.touches && e.touches.length === 1) {
+          startX = e.touches[0].clientX;
+          startY = e.touches[0].clientY;
+        }
+      }, { passive: true });
+      stage.addEventListener('touchend', (e) => {
+        if (!e.changedTouches || e.changedTouches.length !== 1) return;
+        if (!document.getElementById('lightbox')?.classList.contains('active')) return;
+        const dx = e.changedTouches[0].clientX - startX;
+        const dy = e.changedTouches[0].clientY - startY;
+        if (Math.abs(dx) > 45 && Math.abs(dx) > Math.abs(dy) * 1.4) {
+          stepLightbox(dx < 0 ? 1 : -1);
+        }
+      }, { passive: true });
     }
   </script>
 </body>

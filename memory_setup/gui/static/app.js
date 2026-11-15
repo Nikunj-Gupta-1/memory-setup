@@ -499,9 +499,11 @@ function renderShareStatus(s) {
   }
 
   const ts = s.tailscale || {};
+  const isConnected = Boolean(ts.connected || ts.running);
+  const tsIp = ts.tailscale_ip || ts.ipv4 || '';
   const tsBadge = document.getElementById('tailscaleBadge');
   if (tsBadge) {
-    if (ts.connected) {
+    if (isConnected) {
       tsBadge.className = 'badge-ok';
       tsBadge.innerText = 'CONNECTED';
     } else if (ts.installed) {
@@ -515,9 +517,9 @@ function renderShareStatus(s) {
 
   const detail = document.getElementById('shareTailscaleDetail');
   if (detail) {
-    const ipTxt = ts.tailscale_ip ? `Tailscale IP: ${ts.tailscale_ip}` : 'Tailscale IP unavailable until connected';
+    const ipTxt = tsIp ? `Tailscale IP: ${tsIp}` : 'Tailscale IP unavailable until connected';
     const lanTxt = s.lan_ip ? `Home Wi-Fi IP: ${s.lan_ip}` : 'Home Wi-Fi IP unavailable';
-    detail.innerText = `${ts.message || 'Tailscale checked.'} · ${ipTxt} · ${lanTxt}`;
+    detail.innerText = `${ts.message || (isConnected ? 'Tailscale VPN connected.' : 'Tailscale checked.')} · ${ipTxt} · ${lanTxt}`;
   }
 
   const portInput = document.getElementById('sharePortInput');
@@ -671,6 +673,9 @@ async function openTailscaleApp() {
   const data = await res.json();
   setShareFeedback(data.message || 'Checked Tailscale app.', !data.opened && !data.tailscale?.installed);
   await refreshShareStatus();
+  [1500, 4000, 8000].forEach(delay => {
+    setTimeout(() => { refreshShareStatus(); }, delay);
+  });
 }
 
 async function copyShareUrl(inputId) {
@@ -726,8 +731,15 @@ window.addEventListener('DOMContentLoaded', async () => {
     } catch (_) {}
   };
 
+  const sharePollTimer = setInterval(() => {
+    if (activeStudioTab === 'share' || activeStudioTab === 'all') {
+      refreshShareStatus();
+    }
+  }, 3000);
+
   const closeStream = () => {
     try {
+      clearInterval(sharePollTimer);
       evtSource.close();
     } catch (_) {}
   };

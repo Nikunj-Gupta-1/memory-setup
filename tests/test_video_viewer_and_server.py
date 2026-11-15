@@ -391,6 +391,12 @@ def test_museum_server_loads_password_from_share_config(tmp_path: Path) -> None:
         except urllib.error.HTTPError as exc:
             assert exc.code == 401
 
+        try:
+            urllib.request.urlopen(f"{base}/__museum_ping", timeout=5)
+            assert False, "Expected 401 for unauthenticated /__museum_ping"
+        except urllib.error.HTTPError as exc:
+            assert exc.code == 401
+
         jar = http.cookiejar.CookieJar()
         opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
         login = urllib.request.Request(
@@ -405,6 +411,24 @@ def test_museum_server_loads_password_from_share_config(tmp_path: Path) -> None:
             html = resp.read().decode("utf-8", errors="ignore")
             assert "lockMuseumBtn" in html
             assert "/__museum_logout" in html
+            assert "initLiveSessionGuard" in html
+            assert "triggerRemoteLogout" in html
+            assert "/__museum_events" in html
+            assert "/__museum_ping" in html
+            assert "setupTouchSwipe" in html
+            assert "@media (max-width: 640px)" in html
+
+        with opener.open(f"{base}/__museum_ping", timeout=5) as resp:
+            assert resp.status == 200
+            assert json.loads(resp.read().decode("utf-8"))["ok"] is True
+
+        # Setting shutdown event immediately forces /__museum_ping to return 401
+        standalone_server._get_shutdown_event(httpd).set()
+        try:
+            opener.open(f"{base}/__museum_ping", timeout=5)
+            assert False, "Expected 401 after shutdown event is set"
+        except urllib.error.HTTPError as exc:
+            assert exc.code == 401
     finally:
         httpd.shutdown()
         httpd.server_close()

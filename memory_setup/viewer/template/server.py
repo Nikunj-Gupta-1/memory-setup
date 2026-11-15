@@ -20,6 +20,8 @@ import shutil
 import socketserver
 import sqlite3
 import subprocess
+import threading
+import time
 import urllib.parse
 import webbrowser
 from pathlib import Path
@@ -295,6 +297,14 @@ def _get_session_secret(server: Any) -> bytes:
     return bytes(secret)
 
 
+def _get_shutdown_event(server: Any) -> threading.Event:
+    evt = getattr(server, "museum_shutdown_event", None)
+    if not isinstance(evt, threading.Event):
+        evt = threading.Event()
+        server.museum_shutdown_event = evt
+    return evt
+
+
 def _compute_session_token(secret: bytes, password: str) -> str:
     return hmac.new(secret, b"museum-session-v1:" + password.encode("utf-8"), hashlib.sha256).hexdigest()
 
@@ -342,7 +352,7 @@ def _render_login_html(next_path: str, error_msg: str = "") -> bytes:
     label {{ display: block; font-size: 0.78rem; font-weight: 600; color: #cbd5e1; margin-bottom: 6px; }}
     input[type="password"] {{
       width: 100%; padding: 11px 13px; border-radius: 8px; background: #0a101d;
-      border: 1px solid rgba(148,163,184,0.3); color: #f1f5f9; font-size: 0.95rem; margin-bottom: 14px;
+      border: 1px solid rgba(148,163,184,0.3); color: #f1f5f9; font-size: 16px; margin-bottom: 14px;
     }}
     input[type="password"]:focus {{ outline: none; border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99,102,241,0.22); }}
     button {{
@@ -459,6 +469,8 @@ class MuseumHandler(http.server.SimpleHTTPRequestHandler):
         return root, db_path
 
     def _is_authenticated(self) -> bool:
+        if _get_shutdown_event(self.server).is_set():
+            return False
         pwd = _get_auth_password(self.server)
         if not pwd:
             return True
@@ -518,6 +530,70 @@ class MuseumHandler(http.server.SimpleHTTPRequestHandler):
         self.send_header("Location", "/viewer/viewer.html")
         self.end_headers()
 
+    def _handle_ping(self) -> None:
+        shutdown_evt = _get_shutdown_event(self.server)
+        if shutdown_evt.is_set() or not self._is_authenticated():
+            body = json.dumps({"ok": False, "locked": True, "reason": "session_ended"}).encode("utf-8")
+            self.send_response(401)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Set-Cookie", "museum_session=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        body = json.dumps({"ok": True, "locked": False}).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _handle_events(self) -> None:
+        shutdown_evt = _get_shutdown_event(self.server)
+        if shutdown_evt.is_set() or not self._is_authenticated():
+            body = json.dumps({"ok": False, "locked": True}).encode("utf-8")
+            self.send_response(401)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+
+        self.close_connection = True
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Connection", "close")
+        self.end_headers()
+
+        initial_secret = _get_session_secret(self.server)
+        initial_pwd = _get_auth_password(self.server)
+        ticks = 0
+        try:
+            self.wfile.write(b": connected\n\n")
+            self.wfile.flush()
+            while True:
+                if (
+                    shutdown_evt.is_set()
+                    or _get_session_secret(self.server) != initial_secret
+                    or _get_auth_password(self.server) != initial_pwd
+                ):
+                    payload = json.dumps({"reason": "server_stopped_or_locked"})
+                    self.wfile.write(f"event: logout\ndata: {payload}\n\n".encode("utf-8"))
+                    self.wfile.flush()
+                    break
+                if shutdown_evt.wait(0.2):
+                    continue
+                ticks += 1
+                if ticks % 50 == 0:
+                    self.wfile.write(b": keepalive\n\n")
+                    self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            return
+
     def _serve_file(self, file_path: Path, head_only: bool = False) -> None:
         if not file_path.exists() or not file_path.is_file():
             self.send_error(404, "File not found")
@@ -548,6 +624,8 @@ class MuseumHandler(http.server.SimpleHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-Type", ctype)
             self.send_header("Accept-Ranges", "bytes")
+            if _get_auth_password(self.server) and file_path.suffix.lower() in {".html", ".js", ".json"}:
+                self.send_header("Cache-Control", "no-store")
             self.send_header("Content-Length", str(size))
             self.end_headers()
 
@@ -615,6 +693,12 @@ class MuseumHandler(http.server.SimpleHTTPRequestHandler):
         parsed = urllib.parse.urlparse(self.path)
         if parsed.path == "/__museum_logout":
             self._handle_logout()
+            return
+        if parsed.path == "/__museum_ping":
+            self._handle_ping()
+            return
+        if parsed.path == "/__museum_events":
+            self._handle_events()
             return
         if not self._is_authenticated():
             self._send_auth_required(head_only=False)
@@ -908,6 +992,7 @@ def main() -> None:
     httpd.museum_password = resolved_password  # type: ignore[attr-defined]
     httpd.museum_read_only = bool(args.read_only)  # type: ignore[attr-defined]
     httpd.museum_session_secret = secrets.token_bytes(32)  # type: ignore[attr-defined]
+    httpd.museum_shutdown_event = threading.Event()  # type: ignore[attr-defined]
 
     display_host = "localhost" if args.host in ("127.0.0.1", "0.0.0.0") else args.host
     url = f"http://{display_host}:{port}/viewer/viewer.html"
@@ -925,6 +1010,9 @@ def main() -> None:
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
+        _get_shutdown_event(httpd).set()
+        time.sleep(0.25)
+        httpd.server_close()
         print("\nViewer server stopped safely.")
 
 

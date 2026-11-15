@@ -64,3 +64,53 @@ def test_build_biometrics_install_command_uses_pip_when_present() -> None:
         cmd = build_biometrics_install_command("/tmp/.venv/bin/python")
 
     assert cmd == ["/tmp/.venv/bin/python", "-m", "pip", "install", *BIOMETRICS_PACKAGES]
+
+
+def test_check_tailscale_status_returns_connected_ip_and_message() -> None:
+    import json
+    from memory_setup.setup.checker import check_tailscale_status
+
+    fake_json = json.dumps(
+        {
+            "BackendState": "Running",
+            "TailscaleIPs": ["100.116.41.118", "fd7a:115c:a1e0::1"],
+            "Self": {
+                "DNSName": "macbook.tail7c6def.ts.net.",
+                "HostName": "MacBook",
+            },
+        }
+    )
+    fake_proc = MagicMock(stdout=fake_json, returncode=0)
+    with (
+        patch("memory_setup.setup.checker._find_tailscale_binary", return_value="/Applications/Tailscale.app/Contents/MacOS/Tailscale"),
+        patch("memory_setup.setup.checker.subprocess.run", return_value=fake_proc),
+    ):
+        info = check_tailscale_status()
+
+    assert info["installed"] is True
+    assert info["connected"] is True
+    assert info["running"] is True
+    assert info["ipv4"] == "100.116.41.118"
+    assert info["tailscale_ip"] == "100.116.41.118"
+    assert info["dns_name"] == "macbook.tail7c6def.ts.net"
+    assert "100.116.41.118" in info["message"]
+
+
+def test_check_tailscale_status_interface_ip_fallback() -> None:
+    from memory_setup.setup.checker import check_tailscale_status
+
+    fake_ifconfig = MagicMock(
+        stdout="utun6: flags=8051<UP,POINTOPOINT,RUNNING>\n\tinet 100.101.22.33 --> 100.101.22.33 netmask 0xffffffff\n",
+        returncode=0,
+    )
+    with (
+        patch("memory_setup.setup.checker._find_tailscale_binary", return_value=None),
+        patch("memory_setup.setup.checker.platform.system", return_value="Darwin"),
+        patch("memory_setup.setup.checker.subprocess.run", return_value=fake_ifconfig),
+    ):
+        info = check_tailscale_status()
+
+    assert info["installed"] is True
+    assert info["connected"] is True
+    assert info["tailscale_ip"] == "100.101.22.33"
+    assert info["ipv4"] == "100.101.22.33"
