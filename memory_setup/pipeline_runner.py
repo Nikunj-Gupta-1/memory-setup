@@ -145,16 +145,26 @@ class PipelineManager:
 
             if "stage2" in stages and not self._stop_event.is_set():
                 self._on_progress({"stage": "stage2", "current": 0, "total": 1, "message": "Stage 2: Extracting EXIF, geocoding & generating proxies..."})
-                results["stage2"] = run_stage2_standardization(ctx, progress_cb=self._on_progress)
+                results["stage2"] = run_stage2_standardization(
+                    ctx, progress_cb=self._on_progress, reprocess=ctx.reprocess
+                )
 
             if "stage3" in stages and not self._stop_event.is_set():
                 self._on_progress({"stage": "stage3", "current": 0, "total": 1, "message": "Stage 3: Validating images & computing perceptual hashes..."})
-                results["stage3"] = run_stage3_validation(ctx, progress_cb=self._on_progress)
+                results["stage3"] = run_stage3_validation(
+                    ctx, progress_cb=self._on_progress, reprocess=ctx.reprocess
+                )
 
             if "stage4_faces" in stages and ctx.enable_biometrics and not self._stop_event.is_set():
                 self._on_progress({"stage": "stage4_faces", "current": 0, "total": 1, "message": "Stage 4A: Detecting faces & clustering family identities..."})
-                scan_res = run_biometric_face_scan(ctx, progress_cb=self._on_progress)
-                cluster_res = cluster_and_generate_avatars(ctx)
+                scan_res = run_biometric_face_scan(
+                    ctx, progress_cb=self._on_progress, reprocess=ctx.reprocess, stop_event=self._stop_event
+                )
+                cluster_res = (
+                    {"status": "paused", "preserved_existing": True}
+                    if self._stop_event.is_set()
+                    else cluster_and_generate_avatars(ctx, recluster=ctx.recluster)
+                )
                 results["stage4_faces"] = {"scan": scan_res, "clustering": cluster_res}
 
             if "stage4_vision" in stages and ctx.enable_vision and not self._stop_event.is_set():

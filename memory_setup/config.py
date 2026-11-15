@@ -21,6 +21,29 @@ IGNORE_FILENAMES = {
     "wpsettings.dat",
 }
 
+# Files generated at archive_root by Memory Setup / Offline Museum that must never be ingested
+ARCHIVE_ROOT_IGNORE_FILENAMES = {
+    "start_viewer.command",
+    "start_viewer.bat",
+    "agent.md",
+    "project_manifesto.md",
+    "cleanup_homework.sh",
+    "commit_merges.py",
+}
+
+ARCHIVE_ROOT_IGNORE_PREFIXES = (
+    "cleanup_homework",
+    "commit_merges",
+)
+
+ARCHIVE_ROOT_IGNORE_EXTS = {
+    ".lnk",
+    ".sqlite",
+    ".sqlite-shm",
+    ".sqlite-wal",
+    ".db",
+}
+
 IGNORE_DIRNAMES = {
     "$recycle.bin",
     "system volume information",
@@ -33,6 +56,8 @@ IGNORE_DIRNAMES = {
     "avatars",
     ".venv",
     "__pycache__",
+    "__macosx",
+    ".pytest_cache",
 }
 
 MIN_FREE_DISK_GB = 15.0
@@ -60,6 +85,8 @@ class ArchiveContext:
     ollama_model: str = OLLAMA_DEFAULT_MODEL
     enable_biometrics: bool = True
     enable_vision: bool = True
+    reprocess: bool = False
+    recluster: bool = False
 
     def __post_init__(self) -> None:
         self.archive_root = Path(self.archive_root).expanduser().resolve()

@@ -1,453 +1,1337 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="light">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Offline Media Archive &amp; Museum Viewer</title>
+  <title>Family Memory Archive — Offline Museum</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script>
+    (function () {
+      try {
+        const saved = localStorage.getItem('museum_theme');
+        if (saved === 'dark' || saved === 'light') {
+          document.documentElement.setAttribute('data-theme', saved);
+        }
+      } catch (_) {}
+    })();
+  </script>
   <style>
     :root {
-      --bg: #0f1117;
-      --card-bg: #1a1d26;
-      --border: #2a2e3d;
-      --text: #e2e8f0;
-      --text-muted: #94a3b8;
-      --accent: #3b82f6;
-      --accent-hover: #2563eb;
-      --danger: #ef4444;
-      --danger-hover: #dc2626;
-      --warning: #f59e0b;
-      --success: #10b981;
+      --font-serif: "Iowan Old Style", "New York", "Palatino Linotype", Georgia, serif;
+      --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", "Segoe UI", Roboto, sans-serif;
+
+      /* Warm Archival Gallery Daylight (Default) */
+      --bg: #F6F3EC;
+      --bg-elevated: #FFFFFF;
+      --bg-subtle: #EDE8DD;
+      --bg-glass: rgba(246, 243, 236, 0.88);
+      --border: rgba(26, 24, 21, 0.10);
+      --border-strong: rgba(26, 24, 21, 0.18);
+      --text: #1A1815;
+      --text-secondary: #5B554C;
+      --text-muted: #847D72;
+      --accent: #9A4D2E;
+      --accent-hover: #7D3B20;
+      --accent-soft: rgba(154, 77, 46, 0.11);
+      --accent-ink: #FFFFFF;
+      --success: #2A6B4A;
+      --success-soft: rgba(42, 107, 74, 0.12);
+      --warning: #9C6311;
+      --warning-soft: rgba(156, 99, 17, 0.12);
+      --danger: #B4382A;
+      --danger-hover: #962B1F;
+      --danger-soft: rgba(180, 56, 42, 0.10);
+      --video-stage: #1A1815;
+      --shadow-sm: 0 2px 8px rgba(26, 24, 21, 0.05);
+      --shadow-md: 0 10px 28px rgba(26, 24, 21, 0.09);
+      --shadow-lg: 0 24px 64px rgba(15, 13, 10, 0.28);
+      --radius-sm: 8px;
+      --radius-md: 14px;
+      --radius-lg: 20px;
     }
+
+    html[data-theme="dark"] {
+      --bg: #11100E;
+      --bg-elevated: #1A1815;
+      --bg-subtle: #24211D;
+      --bg-glass: rgba(17, 16, 14, 0.88);
+      --border: rgba(244, 240, 232, 0.10);
+      --border-strong: rgba(244, 240, 232, 0.20);
+      --text: #F4F0E8;
+      --text-secondary: #BFB7AA;
+      --text-muted: #8C8478;
+      --accent: #D4956A;
+      --accent-hover: #E1A982;
+      --accent-soft: rgba(212, 149, 106, 0.15);
+      --accent-ink: #171411;
+      --success: #4AA876;
+      --success-soft: rgba(74, 168, 118, 0.15);
+      --warning: #E3A74B;
+      --warning-soft: rgba(227, 167, 75, 0.15);
+      --danger: #E06758;
+      --danger-hover: #EE7A6C;
+      --danger-soft: rgba(224, 103, 88, 0.15);
+      --video-stage: #0B0A09;
+      --shadow-sm: 0 2px 10px rgba(0, 0, 0, 0.25);
+      --shadow-md: 0 12px 32px rgba(0, 0, 0, 0.42);
+      --shadow-lg: 0 28px 72px rgba(0, 0, 0, 0.65);
+    }
+
     * { box-sizing: border-box; margin: 0; padding: 0; }
+
     body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      font-family: var(--font-sans);
       background: var(--bg);
       color: var(--text);
       display: flex;
       flex-direction: column;
       height: 100vh;
       overflow: hidden;
+      -webkit-font-smoothing: antialiased;
+      font-variant-numeric: tabular-nums;
+      transition: background-color 0.2s ease, color 0.2s ease;
     }
-    header {
-      background: var(--card-bg);
+
+    button, input, select { font-family: inherit; }
+
+    /* Masthead */
+    header.masthead {
+      background: var(--bg-elevated);
       border-bottom: 1px solid var(--border);
-      padding: 12px 24px;
+      padding: 14px 28px;
       display: flex;
       align-items: center;
       justify-content: space-between;
+      gap: 20px;
       flex-shrink: 0;
-    }
-    .logo {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      font-weight: 700;
-      font-size: 1.15rem;
-      letter-spacing: -0.02em;
-    }
-    .badge {
-      background: rgba(59, 130, 246, 0.15);
-      color: #60a5fa;
-      padding: 4px 10px;
-      border-radius: 9999px;
-      font-size: 0.8rem;
-      font-weight: 600;
-    }
-    .metrics { display: flex; gap: 16px; font-size: 0.85rem; flex-wrap: wrap; }
-    .metric-pill {
-      background: rgba(255,255,255,0.05);
-      border: 1px solid var(--border);
-      padding: 6px 14px;
-      border-radius: 8px;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-    .metric-pill strong { color: #fff; }
-    nav.tabs {
-      background: #141720;
-      border-bottom: 1px solid var(--border);
-      display: flex;
-      padding: 0 24px;
-      gap: 8px;
-      flex-shrink: 0;
-    }
-    .tab-btn {
-      background: transparent;
-      border: none;
-      color: var(--text-muted);
-      padding: 12px 18px;
-      font-size: 0.9rem;
-      font-weight: 600;
-      cursor: pointer;
-      border-bottom: 2px solid transparent;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      transition: all 0.15s ease;
-    }
-    .tab-btn:hover { color: var(--text); }
-    .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
-    main { flex: 1; overflow: hidden; position: relative; }
-    .tab-pane { display: none; height: 100%; width: 100%; overflow-y: auto; }
-    .tab-pane.active { display: flex; flex-direction: column; }
-    .search-bar {
-      padding: 16px 24px;
-      background: var(--bg);
-      border-bottom: 1px solid var(--border);
-      display: flex;
-      gap: 16px;
-      align-items: center;
-      flex-shrink: 0;
-    }
-    .search-input {
-      flex: 1;
-      background: var(--card-bg);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 10px 16px;
-      color: var(--text);
-      font-size: 0.95rem;
-      outline: none;
-    }
-    .search-input:focus { border-color: var(--accent); }
-    .filter-tag {
-      background: rgba(59, 130, 246, 0.2);
-      color: #60a5fa;
-      border: 1px solid rgba(59, 130, 246, 0.4);
-      padding: 6px 12px;
-      border-radius: 6px;
-      font-size: 0.85rem;
-      display: none;
-      align-items: center;
-      gap: 8px;
-    }
-    .filter-tag .clear { cursor: pointer; font-weight: bold; }
-    .photo-grid-container { flex: 1; overflow-y: auto; padding: 24px; }
-    .photo-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-      gap: 16px;
-    }
-    .photo-card {
-      background: var(--card-bg);
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      overflow: hidden;
-      cursor: pointer;
-      transition: transform 0.15s ease, border-color 0.15s ease;
-      display: flex;
-      flex-direction: column;
-    }
-    .photo-card:hover { transform: translateY(-2px); border-color: var(--accent); }
-    .card-thumb { width: 100%; height: 180px; object-fit: cover; background: #1e2230; display: block; }
-    .card-info { padding: 10px 12px; display: flex; flex-direction: column; gap: 4px; }
-    .card-title { font-size: 0.85rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .card-meta { font-size: 0.75rem; color: var(--text-muted); display: flex; justify-content: space-between; gap: 8px; }
-    #map { width: 100%; height: 100%; background: #0f1117; }
-    .people-container { padding: 24px; overflow-y: auto; }
-    .people-action-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; gap: 16px; }
-    .section-title { font-size: 1.15rem; font-weight: 700; margin-bottom: 16px; color: #f1f5f9; display: flex; align-items: center; gap: 10px; }
-    .people-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 16px; margin-bottom: 32px; }
-    .person-card {
-      background: var(--card-bg);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 16px;
-      text-align: center;
-      cursor: pointer;
-      transition: all 0.15s ease;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-    }
-    .person-card:hover { border-color: var(--accent); transform: translateY(-2px); }
-    .person-card.active-filter { border-color: #3b82f6; background: rgba(59, 130, 246, 0.12); }
-    .person-avatar { width: 96px; height: 96px; border-radius: 50%; object-fit: cover; margin-bottom: 12px; border: 3px solid rgba(255,255,255,0.1); background: #252a3a; }
-    .person-name { font-weight: 600; font-size: 0.95rem; margin-bottom: 4px; color: #fff; }
-    .person-count { font-size: 0.8rem; color: var(--text-muted); }
-    .homework-container { padding: 24px; overflow-y: auto; }
-    .hw-header {
-      background: rgba(239, 68, 68, 0.1);
-      border: 1px solid rgba(239, 68, 68, 0.3);
-      padding: 16px 20px;
-      border-radius: 10px;
-      margin-bottom: 24px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 16px;
       flex-wrap: wrap;
     }
-    .btn {
-      background: var(--accent);
-      color: white;
-      border: none;
-      padding: 8px 16px;
-      border-radius: 6px;
-      font-size: 0.85rem;
+
+    .brand-lockup {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .brand-mark {
+      width: 38px;
+      height: 38px;
+      border-radius: 10px;
+      background: var(--accent-soft);
+      color: var(--accent);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+
+    .brand-title {
+      font-family: var(--font-serif);
+      font-size: 1.28rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      line-height: 1.15;
+    }
+
+    .brand-sub {
+      font-size: 0.76rem;
+      color: var(--text-muted);
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      margin-top: 2px;
+    }
+
+    .masthead-right {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .stat-strip {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    .stat-pill {
+      background: var(--bg-subtle);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 5px 12px;
+      font-size: 0.79rem;
+      color: var(--text-secondary);
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .stat-pill strong {
+      color: var(--text);
+      font-weight: 650;
+    }
+
+    .theme-toggle {
+      background: var(--bg-subtle);
+      color: var(--text);
+      border: 1px solid var(--border-strong);
+      border-radius: 999px;
+      padding: 6px 13px;
+      font-size: 0.8rem;
       font-weight: 600;
       cursor: pointer;
       display: inline-flex;
       align-items: center;
       gap: 6px;
+      transition: all 0.15s ease;
     }
-    .btn:hover { background: var(--accent-hover); }
-    .btn-secondary { background: rgba(255, 255, 255, 0.1); border: 1px solid var(--border); }
-    .btn-secondary:hover { background: rgba(255, 255, 255, 0.15); }
-    .btn-danger { background: var(--danger); }
-    .btn-danger:hover { background: var(--danger-hover); }
-    .lightbox {
-      display: none;
-      position: fixed;
-      top: 0; left: 0; right: 0; bottom: 0;
-      background: rgba(0,0,0,0.85);
-      backdrop-filter: blur(8px);
-      z-index: 9999;
+
+    .theme-toggle:hover {
+      background: var(--accent-soft);
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    /* Editorial Navigation */
+    nav.tabs {
+      background: var(--bg-elevated);
+      border-bottom: 1px solid var(--border);
+      padding: 0 28px;
+      display: flex;
       align-items: center;
-      justify-content: center;
+      gap: 6px;
+      flex-shrink: 0;
+      overflow-x: auto;
     }
-    .lightbox.active { display: flex; }
-    .lightbox-content {
-      background: var(--card-bg);
+
+    .tab-btn {
+      background: transparent;
+      border: none;
+      border-bottom: 2px solid transparent;
+      color: var(--text-muted);
+      padding: 12px 16px;
+      font-size: 0.88rem;
+      font-weight: 600;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      white-space: nowrap;
+      transition: color 0.15s ease, border-color 0.15s ease;
+    }
+
+    .tab-btn svg {
+      width: 16px;
+      height: 16px;
+      flex-shrink: 0;
+      opacity: 0.8;
+    }
+
+    .tab-btn:hover { color: var(--text); }
+
+    .tab-btn.active {
+      color: var(--accent);
+      border-bottom-color: var(--accent);
+    }
+
+    .tab-btn.active svg { opacity: 1; }
+
+    .tab-badge {
+      background: var(--bg-subtle);
+      color: var(--text-secondary);
       border: 1px solid var(--border);
-      border-radius: 12px;
-      max-width: 90vw;
-      max-height: 90vh;
-      display: flex;
-      overflow: hidden;
-      box-shadow: 0 25px 50px -12px rgba(0,0,0,0.7);
+      font-size: 0.72rem;
+      font-weight: 650;
+      padding: 1px 7px;
+      border-radius: 999px;
     }
-    .lightbox-img-wrap {
-      flex: 2;
-      background: #000;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      min-width: 400px;
-      max-width: 65vw;
-      max-height: 85vh;
+
+    .tab-badge.warn {
+      background: var(--danger-soft);
+      color: var(--danger);
+      border-color: transparent;
     }
-    .lightbox-img-wrap img { max-width: 100%; max-height: 85vh; object-fit: contain; }
-    .lightbox-sidebar {
-      flex: 1;
-      padding: 24px;
-      display: flex;
-      flex-direction: column;
-      gap: 16px;
-      min-width: 320px;
-      max-width: 420px;
-      border-left: 1px solid var(--border);
+
+    main { flex: 1; overflow: hidden; position: relative; }
+
+    .tab-pane {
+      display: none;
+      height: 100%;
+      width: 100%;
       overflow-y: auto;
+      scroll-behavior: smooth;
     }
-    .close-btn { align-self: flex-end; background: transparent; border: none; color: var(--text-muted); font-size: 1.5rem; cursor: pointer; }
-    .close-btn:hover { color: #fff; }
-    .manager-modal {
+
+    .tab-pane.active {
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Sticky Control Bar */
+    .control-bar {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      background: var(--bg-glass);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      border-bottom: 1px solid var(--border);
+      padding: 14px 28px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .search-field {
+      flex: 1;
+      min-width: 240px;
+      position: relative;
+      display: flex;
+      align-items: center;
+    }
+
+    .search-field svg {
+      position: absolute;
+      left: 13px;
+      width: 16px;
+      height: 16px;
+      color: var(--text-muted);
+      pointer-events: none;
+    }
+
+    .search-input {
+      width: 100%;
+      background: var(--bg-elevated);
+      border: 1px solid var(--border-strong);
+      color: var(--text);
+      padding: 9px 36px 9px 38px;
+      border-radius: 999px;
+      font-size: 0.9rem;
+      outline: none;
+      transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    }
+
+    .search-input:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-soft);
+    }
+
+    .search-input::placeholder { color: var(--text-muted); }
+
+    .kbd-hint {
+      position: absolute;
+      right: 12px;
+      font-size: 0.72rem;
+      color: var(--text-muted);
+      background: var(--bg-subtle);
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      padding: 1px 6px;
+      pointer-events: none;
+    }
+
+    .select-ctrl {
+      background: var(--bg-elevated);
+      border: 1px solid var(--border-strong);
+      color: var(--text);
+      padding: 8px 12px;
+      border-radius: 999px;
+      font-size: 0.84rem;
+      font-weight: 550;
+      cursor: pointer;
+      outline: none;
+    }
+
+    .select-ctrl:focus { border-color: var(--accent); }
+
+    .chip-group {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    .filter-chip {
+      background: var(--bg-elevated);
+      color: var(--text-secondary);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 6px 12px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .filter-chip:hover {
+      border-color: var(--border-strong);
+      color: var(--text);
+    }
+
+    .filter-chip.active {
+      background: var(--accent);
+      color: var(--accent-ink);
+      border-color: var(--accent);
+    }
+
+    .active-filter-pill {
       display: none;
+      align-items: center;
+      gap: 8px;
+      background: var(--accent-soft);
+      color: var(--accent);
+      border: 1px solid var(--accent);
+      border-radius: 999px;
+      padding: 5px 12px;
+      font-size: 0.8rem;
+      font-weight: 600;
+    }
+
+    .active-filter-pill button {
+      background: none;
+      border: none;
+      color: inherit;
+      font-size: 1rem;
+      line-height: 1;
+      cursor: pointer;
+      padding: 0 2px;
+    }
+
+    .result-status {
+      font-size: 0.82rem;
+      color: var(--text-muted);
+      margin-left: auto;
+      white-space: nowrap;
+    }
+
+    /* Gallery & Grids */
+    .grid-wrap {
+      padding: 24px 28px 36px;
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+      gap: 20px;
+    }
+
+    .media-card {
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      overflow: hidden;
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      box-shadow: var(--shadow-sm);
+      transition: transform 0.2s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.2s ease, border-color 0.2s ease;
+    }
+
+    .media-card:hover {
+      transform: translateY(-3px);
+      box-shadow: var(--shadow-md);
+      border-color: var(--border-strong);
+    }
+
+    .card-frame {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 4 / 3;
+      background: var(--bg-subtle);
+      overflow: hidden;
+    }
+
+    .card-thumb {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+      transition: transform 0.35s ease;
+    }
+
+    .media-card:hover .card-thumb {
+      transform: scale(1.03);
+    }
+
+    .card-date-pill {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      background: rgba(17, 16, 14, 0.72);
+      color: #F6F3EC;
+      backdrop-filter: blur(6px);
+      font-size: 0.71rem;
+      font-weight: 600;
+      padding: 3px 8px;
+      border-radius: 6px;
+      letter-spacing: 0.02em;
+    }
+
+    .card-info {
+      padding: 13px 15px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      flex: 1;
+      justify-content: space-between;
+    }
+
+    .card-title {
+      font-size: 0.88rem;
+      font-weight: 560;
+      line-height: 1.38;
+      color: var(--text);
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+
+    .card-meta {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.75rem;
+      color: var(--text-muted);
+    }
+
+    .card-meta span {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    /* Video Card Specifics */
+    .video-frame {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 16 / 10;
+      background:
+        radial-gradient(circle at 20% 20%, rgba(212, 149, 106, 0.16), transparent 60%),
+        linear-gradient(135deg, #211E1A 0%, #141210 100%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+    }
+
+    .video-play-orb {
+      width: 52px;
+      height: 52px;
+      border-radius: 50%;
+      background: rgba(246, 243, 236, 0.92);
+      color: #1A1815;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+      transition: transform 0.2s ease, background-color 0.2s ease;
+    }
+
+    .media-card:hover .video-play-orb {
+      transform: scale(1.08);
+      background: #FFFFFF;
+    }
+
+    .video-corner-badges {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      display: flex;
+      gap: 6px;
+    }
+
+    .fmt-badge {
+      background: rgba(17, 16, 14, 0.78);
+      color: #F6F3EC;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      font-size: 0.68rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      padding: 3px 7px;
+      border-radius: 5px;
+    }
+
+    .fmt-badge.live {
+      background: rgba(212, 149, 106, 0.92);
+      color: #1A1815;
+      border-color: transparent;
+    }
+
+    .fmt-badge.avi {
+      background: rgba(180, 56, 42, 0.88);
+      color: #FFFFFF;
+      border-color: transparent;
+    }
+
+    .video-size-pill {
+      position: absolute;
+      bottom: 10px;
+      left: 10px;
+      font-size: 0.72rem;
+      font-weight: 600;
+      color: rgba(246, 243, 236, 0.88);
+      background: rgba(17, 16, 14, 0.65);
+      padding: 2px 7px;
+      border-radius: 5px;
+    }
+
+    .load-more-row {
+      display: flex;
+      justify-content: center;
+      padding: 4px 28px 40px;
+    }
+
+    /* Buttons */
+    .btn {
+      background: var(--accent);
+      color: var(--accent-ink);
+      border: 1px solid transparent;
+      padding: 9px 16px;
+      border-radius: 999px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      text-decoration: none;
+      transition: background-color 0.15s ease, transform 0.1s ease, border-color 0.15s ease;
+    }
+
+    .btn:hover { background: var(--accent-hover); }
+    .btn:active { transform: translateY(1px); }
+
+    .btn-outline {
+      background: var(--bg-elevated);
+      color: var(--text);
+      border-color: var(--border-strong);
+    }
+
+    .btn-outline:hover {
+      background: var(--bg-subtle);
+      border-color: var(--text-muted);
+    }
+
+    .btn-danger {
+      background: var(--danger);
+      color: #FFFFFF;
+    }
+
+    .btn-danger:hover { background: var(--danger-hover); }
+
+    /* People Exhibition */
+    .section-shell {
+      padding: 26px 28px 42px;
+      max-width: 1460px;
+      width: 100%;
+      margin: 0 auto;
+    }
+
+    .section-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      gap: 16px;
+      flex-wrap: wrap;
+      margin-bottom: 20px;
+      padding-bottom: 14px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .section-title {
+      font-family: var(--font-serif);
+      font-size: 1.45rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+
+    .section-sub {
+      color: var(--text-secondary);
+      font-size: 0.88rem;
+      margin-top: 4px;
+    }
+
+    .section-kicker {
+      font-size: 0.78rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      margin: 26px 0 14px;
+    }
+
+    .people-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(175px, 1fr));
+      gap: 16px;
+    }
+
+    .person-card {
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      padding: 20px 14px 16px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+      cursor: pointer;
+      box-shadow: var(--shadow-sm);
+      transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    .person-card:hover {
+      transform: translateY(-3px);
+      box-shadow: var(--shadow-md);
+      border-color: var(--accent);
+    }
+
+    .person-card.active-filter {
+      border: 2px solid var(--accent);
+      background: var(--accent-soft);
+    }
+
+    .person-avatar {
+      width: 96px;
+      height: 96px;
+      border-radius: 50%;
+      object-fit: cover;
+      border: 2px solid var(--border-strong);
+      margin-bottom: 12px;
+      background: var(--bg-subtle);
+    }
+
+    .person-name {
+      font-weight: 650;
+      font-size: 0.94rem;
+      color: var(--text);
+      margin-bottom: 3px;
+    }
+
+    .person-count {
+      font-size: 0.78rem;
+      color: var(--text-muted);
+    }
+
+    /* Map */
+    #map { flex: 1; width: 100%; height: 100%; min-height: 460px; }
+
+    /* Documents Banner */
+    .notice-banner {
+      background: var(--bg-elevated);
+      border: 1px solid var(--border-strong);
+      border-left: 4px solid var(--danger);
+      border-radius: var(--radius-md);
+      padding: 18px 22px;
+      margin: 20px 28px 0;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 18px;
+      flex-wrap: wrap;
+      flex-shrink: 0;
+      box-shadow: var(--shadow-sm);
+    }
+
+    .notice-title {
+      font-family: var(--font-serif);
+      font-size: 1.15rem;
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+
+    .notice-desc {
+      font-size: 0.87rem;
+      color: var(--text-secondary);
+      line-height: 1.45;
+    }
+
+    .readonly-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.78rem;
+      font-weight: 600;
+      color: var(--text-secondary);
+      background: var(--bg-subtle);
+      border: 1px solid var(--border-strong);
+      border-radius: 999px;
+      padding: 6px 12px;
+      white-space: nowrap;
+    }
+
+    /* Lightbox Theater */
+    #lightbox {
       position: fixed;
-      top: 0; left: 0; right: 0; bottom: 0;
-      background: rgba(0,0,0,0.85);
+      inset: 0;
+      background: rgba(14, 13, 11, 0.90);
       backdrop-filter: blur(8px);
-      z-index: 10000;
+      z-index: 1000;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+
+    #lightbox.active { display: flex; }
+
+    .lightbox-panel {
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      max-width: 1220px;
+      width: 100%;
+      height: min(88vh, 820px);
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 360px;
+      overflow: hidden;
+      position: relative;
+      box-shadow: var(--shadow-lg);
+    }
+
+    .lb-stage {
+      background: var(--video-stage);
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px 56px;
+      overflow: hidden;
+      min-height: 280px;
+    }
+
+    .lb-stage img,
+    .lb-stage video {
+      max-width: 100%;
+      max-height: 100%;
+      border-radius: 8px;
+      object-fit: contain;
+      display: block;
+    }
+
+    .lb-nav-btn {
+      position: absolute;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      background: rgba(17, 16, 14, 0.68);
+      color: #F6F3EC;
+      font-size: 1.3rem;
+      line-height: 1;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 5;
+      transition: background-color 0.15s ease, transform 0.15s ease;
+    }
+
+    .lb-nav-btn:hover { background: rgba(17, 16, 14, 0.92); transform: translateY(-50%) scale(1.06); }
+    .lb-nav-prev { left: 14px; }
+    .lb-nav-next { right: 14px; }
+    .lb-nav-btn[disabled] { opacity: 0.25; cursor: default; pointer-events: none; }
+
+    .lb-fallback-card {
+      background: #1E1C18;
+      color: #F4F0E8;
+      border: 1px solid rgba(244, 240, 232, 0.16);
+      border-radius: var(--radius-md);
+      padding: 32px;
+      max-width: 440px;
+      text-align: center;
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .lb-fallback-card.active { display: flex; }
+
+    .lb-fallback-icon {
+      width: 56px;
+      height: 56px;
+      border-radius: 14px;
+      background: rgba(212, 149, 106, 0.16);
+      color: #D4956A;
+      display: flex;
       align-items: center;
       justify-content: center;
     }
-    .manager-modal.active { display: flex; }
-    .manager-box {
-      background: var(--card-bg);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      width: 780px;
-      max-width: 92vw;
-      max-height: 88vh;
+
+    .lb-fallback-card h3 {
+      font-family: var(--font-serif);
+      font-size: 1.2rem;
+    }
+
+    .lb-fallback-card p {
+      color: #BFB7AA;
+      font-size: 0.87rem;
+      line-height: 1.5;
+    }
+
+    .lb-sidebar {
+      padding: 26px 24px;
+      border-left: 1px solid var(--border);
       display: flex;
       flex-direction: column;
-      box-shadow: 0 25px 50px -12px rgba(0,0,0,0.8);
-      overflow: hidden;
+      gap: 18px;
+      overflow-y: auto;
+      background: var(--bg-elevated);
     }
-    .manager-header { padding: 16px 24px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
-    .manager-body { padding: 24px; overflow-y: auto; display: flex; flex-direction: column; gap: 24px; }
-    .manager-section { background: rgba(255,255,255,0.02); border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
-    .manager-section h4 { font-size: 0.95rem; margin-bottom: 12px; color: #60a5fa; display: flex; align-items: center; gap: 8px; }
-    .merge-controls { display: flex; gap: 12px; align-items: center; }
-    .merge-controls select { flex: 1; background: #141720; border: 1px solid var(--border); color: var(--text); padding: 8px 12px; border-radius: 6px; font-size: 0.9rem; }
-    .naming-table { width: 100%; border-collapse: collapse; margin-top: 8px; }
-    .naming-table th, .naming-table td { padding: 8px 12px; text-align: left; font-size: 0.85rem; border-bottom: 1px solid rgba(255,255,255,0.05); }
-    .naming-table th { color: var(--text-muted); font-weight: 600; }
-    .naming-table input { background: #141720; border: 1px solid var(--border); color: var(--text); padding: 6px 10px; border-radius: 4px; width: 100%; font-size: 0.85rem; }
-    .naming-table input:focus { border-color: var(--accent); outline: none; }
+
+    .lb-top-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .lb-kicker {
+      font-size: 0.75rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      color: var(--accent);
+    }
+
+    .lb-counter {
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      margin-right: 32px;
+    }
+
+    .lb-title {
+      font-family: var(--font-serif);
+      font-size: 1.25rem;
+      font-weight: 700;
+      line-height: 1.3;
+      color: var(--text);
+      word-break: break-word;
+    }
+
+    .lb-desc-box {
+      background: var(--bg-subtle);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 13px 14px;
+      font-size: 0.87rem;
+      line-height: 1.55;
+      color: var(--text-secondary);
+    }
+
+    .lb-kv-list {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      font-size: 0.83rem;
+      border-top: 1px solid var(--border);
+      padding-top: 14px;
+    }
+
+    .lb-kv {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: baseline;
+    }
+
+    .lb-kv-label {
+      color: var(--text-muted);
+      flex-shrink: 0;
+      font-size: 0.78rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .lb-kv-val {
+      color: var(--text);
+      text-align: right;
+      word-break: break-all;
+      font-weight: 500;
+    }
+
+    .lb-actions {
+      margin-top: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 9px;
+      padding-top: 12px;
+      border-top: 1px solid var(--border);
+    }
+
+    .close-btn {
+      position: absolute;
+      top: 14px;
+      right: 14px;
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      background: var(--bg-subtle);
+      color: var(--text);
+      border: 1px solid var(--border-strong);
+      font-size: 1.15rem;
+      line-height: 1;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 10;
+    }
+
+    .close-btn:hover { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+
+    .empty-state {
+      grid-column: 1 / -1;
+      padding: 56px 24px;
+      text-align: center;
+      color: var(--text-muted);
+      background: var(--bg-elevated);
+      border: 1px dashed var(--border-strong);
+      border-radius: var(--radius-md);
+    }
+
+    .empty-state h3 {
+      font-family: var(--font-serif);
+      color: var(--text);
+      margin-bottom: 6px;
+    }
+
+    /* Toast */
+    #toast {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      z-index: 1500;
+      background: var(--text);
+      color: var(--bg-elevated);
+      padding: 11px 18px;
+      border-radius: var(--radius-sm);
+      font-size: 0.85rem;
+      font-weight: 550;
+      box-shadow: var(--shadow-md);
+      opacity: 0;
+      transform: translateY(12px);
+      pointer-events: none;
+      transition: opacity 0.2s ease, transform 0.2s ease;
+      max-width: 420px;
+    }
+
+    #toast.show { opacity: 1; transform: translateY(0); }
+
+    @media (max-width: 960px) {
+      .lightbox-panel {
+        grid-template-columns: 1fr;
+        grid-template-rows: minmax(260px, 55vh) auto;
+        height: 92vh;
+      }
+      .lb-sidebar { border-left: none; border-top: 1px solid var(--border); }
+      header.masthead, nav.tabs, .control-bar, .grid-wrap, .section-shell { padding-left: 16px; padding-right: 16px; }
+      .notice-banner { margin: 16px 16px 0; }
+    }
   </style>
 </head>
 <body>
-
-  <header>
-    <div class="logo">
-      <span style="font-size: 1.4rem;">🏛️</span>
-      <span>OFFLINE MUSEUM VIEWER</span>
-      <span class="badge">Memory Setup Engine</span>
+  <header class="masthead">
+    <div class="brand-lockup">
+      <div class="brand-mark" aria-hidden="true">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="4" width="18" height="16" rx="2.5"></rect>
+          <circle cx="8.5" cy="9.5" r="1.5"></circle>
+          <path d="M21 15l-5-5L5 20"></path>
+        </svg>
+      </div>
+      <div>
+        <div class="brand-title">Family Memory Archive</div>
+        <div class="brand-sub">Private Offline Exhibition</div>
+      </div>
     </div>
-    <div class="metrics">
-      <div class="metric-pill"><span>📸 Total Photos:</span> <strong id="mTotal">-</strong></div>
-      <div class="metric-pill"><span>📍 Cities:</span> <strong id="mCities">0</strong></div>
-      <div class="metric-pill"><span>👤 People Clusters:</span> <strong id="mClusters">0</strong></div>
-      <div class="metric-pill"><span>📝 Docs/Homework:</span> <strong id="mHw" style="color: #f87171;">-</strong></div>
+
+    <div class="masthead-right">
+      <div class="stat-strip">
+        <span class="stat-pill"><strong id="mTotal">0</strong> Photos</span>
+        <span class="stat-pill"><strong id="mVideos">0</strong> Videos</span>
+        <span class="stat-pill"><strong id="mCities">0</strong> Places</span>
+        <span class="stat-pill"><strong id="mClusters">0</strong> People</span>
+        <span class="stat-pill"><strong id="mHw">0</strong> Docs</span>
+      </div>
+      <button id="themeToggleBtn" class="theme-toggle" onclick="toggleTheme()" type="button" aria-label="Toggle color theme">
+        <span id="themeIcon">🌙</span>
+        <span id="themeLabel">Darkroom</span>
+      </button>
     </div>
   </header>
 
-  <nav class="tabs">
-    <button class="tab-btn active" onclick="switchTab('gallery')">🖼️ Gallery</button>
-    <button class="tab-btn" onclick="switchTab('map')">🗺️ Interactive Map</button>
-    <button class="tab-btn" onclick="switchTab('people')">👥 People &amp; Faces</button>
-    <button class="tab-btn" onclick="switchTab('homework')">📝 Homework &amp; Docs (<span id="hwBadge">0</span>)</button>
+  <nav class="tabs" aria-label="Archive sections">
+    <button class="tab-btn active" onclick="switchTab('gallery')" type="button">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><path d="M21 15l-5-5L5 21"></path></svg>
+      <span>Photos</span>
+      <span class="tab-badge" id="photosBadge">0</span>
+    </button>
+    <button class="tab-btn" onclick="switchTab('videos')" type="button">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"></polygon><rect x="1" y="5" width="15" height="14" rx="2"></rect></svg>
+      <span>Videos</span>
+      <span class="tab-badge" id="videosBadge">0</span>
+    </button>
+    <button class="tab-btn" onclick="switchTab('map')" type="button">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
+      <span>Places Map</span>
+    </button>
+    <button class="tab-btn" onclick="switchTab('people')" type="button">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+      <span>People</span>
+    </button>
+    <button class="tab-btn" onclick="switchTab('homework')" type="button">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
+      <span>Documents &amp; Homework</span>
+      <span class="tab-badge warn" id="hwBadge">0</span>
+    </button>
   </nav>
 
   <main>
-    <div id="tab-gallery" class="tab-pane active">
-      <div class="search-bar">
-        <input type="text" id="searchInput" class="search-input" placeholder="Search by AI description, city, country, date (YYYY-MM-DD), camera..." oninput="handleSearch()">
-        <div id="activeFilterTag" class="filter-tag"></div>
-      </div>
-      <div class="photo-grid-container" id="galleryScroll" onscroll="handleScroll(event)">
-        <div id="photoGrid" class="photo-grid"></div>
-        <div id="loadStatus" style="text-align: center; padding: 24px; color: var(--text-muted); font-size: 0.85rem;"></div>
-      </div>
-    </div>
-
-    <div id="tab-map" class="tab-pane">
-      <div id="map"></div>
-    </div>
-
-    <div id="tab-people" class="tab-pane">
-      <div class="people-container">
-        <div class="people-action-bar">
-          <div>
-            <h3 class="section-title">👑 Core Family Members (Ranked by Frequency)</h3>
-            <p style="color: var(--text-muted); font-size: 0.85rem;">Clustered via ArcFace ResNet-50 embeddings with 5-point facial landmark alignment.</p>
-          </div>
-          <button class="btn btn-secondary" onclick="openPeopleManager()">⚙️ Manage &amp; Merge People</button>
+    <!-- Photos Gallery -->
+    <section id="tab-gallery" class="tab-pane active" onscroll="handlePhotoScroll(event)">
+      <div class="control-bar">
+        <div class="search-field">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+          <input type="text" id="searchInput" class="search-input" placeholder="Search captions, cities, years, cameras, or IDs..." oninput="handlePhotoSearch()">
+          <span class="kbd-hint">/</span>
         </div>
+
+        <select id="photoYearFilter" class="select-ctrl" onchange="handlePhotoSearch()" aria-label="Filter photos by year">
+          <option value="">All Years</option>
+        </select>
+
+        <select id="photoSortOrder" class="select-ctrl" onchange="handlePhotoSearch()" aria-label="Sort photos">
+          <option value="newest">Newest First</option>
+          <option value="oldest">Oldest First</option>
+        </select>
+
+        <div id="activeFilterTag" class="active-filter-pill"></div>
+        <div id="loadStatus" class="result-status">Loading catalog...</div>
+      </div>
+
+      <div id="photoGrid" class="grid-wrap"></div>
+      <div id="photoLoadMoreRow" class="load-more-row" style="display: none;">
+        <button class="btn btn-outline" onclick="renderNextPhotoBatch()" type="button">Load More Photos</button>
+      </div>
+    </section>
+
+    <!-- Video Cinema Library -->
+    <section id="tab-videos" class="tab-pane" onscroll="handleVideoScroll(event)">
+      <div class="control-bar">
+        <div class="search-field">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+          <input type="text" id="videoSearchInput" class="search-input" placeholder="Search video filename, date, format, or ID..." oninput="handleVideoFilter()">
+        </div>
+
+        <select id="videoYearFilter" class="select-ctrl" onchange="handleVideoFilter()" aria-label="Filter videos by year">
+          <option value="">All Years</option>
+        </select>
+
+        <div class="chip-group" role="group" aria-label="Video format filter">
+          <button class="filter-chip active" data-fmt="all" onclick="setVideoFormat('all', this)" type="button">All Formats</button>
+          <button class="filter-chip" data-fmt=".mov" onclick="setVideoFormat('.mov', this)" type="button">MOV</button>
+          <button class="filter-chip" data-fmt=".mp4" onclick="setVideoFormat('.mp4', this)" type="button">MP4</button>
+          <button class="filter-chip" data-fmt=".avi" onclick="setVideoFormat('.avi', this)" type="button">AVI</button>
+        </div>
+
+        <button id="livePhotoToggle" class="filter-chip" onclick="toggleHideLivePhotos()" type="button">Hide Live Photo Clips</button>
+        <div id="videoStatus" class="result-status">0 videos</div>
+      </div>
+
+      <div id="videoGrid" class="grid-wrap"></div>
+      <div id="videoLoadMoreRow" class="load-more-row" style="display: none;">
+        <button class="btn btn-outline" onclick="renderNextVideoBatch()" type="button">Load More Videos</button>
+      </div>
+    </section>
+
+    <!-- World Map -->
+    <section id="tab-map" class="tab-pane">
+      <div id="map"></div>
+    </section>
+
+    <!-- People Clusters -->
+    <section id="tab-people" class="tab-pane">
+      <div class="section-shell">
+        <div class="section-header">
+          <div>
+            <h2 class="section-title">People &amp; Family Index</h2>
+            <p class="section-sub">Select any person to filter every photograph they appear in. Rename or merge people from the Memory Setup Control Center.</p>
+          </div>
+          <span class="readonly-badge">Read-Only Exhibition View</span>
+        </div>
+
+        <div class="section-kicker">Core Family &amp; Frequent Appearances</div>
         <div id="corePeopleGrid" class="people-grid"></div>
 
-        <h3 class="section-title">🤝 Recurring People &amp; Friends</h3>
+        <div class="section-kicker">Extended &amp; Recurring Faces</div>
         <div id="extendedPeopleGrid" class="people-grid"></div>
       </div>
-    </div>
+    </section>
 
-    <div id="tab-homework" class="tab-pane">
-      <div class="homework-container">
-        <div class="hw-header">
-          <div>
-            <h3 style="font-size: 1.05rem; margin-bottom: 4px; color: #fff;">📝 Document &amp; Homework Segregation</h3>
-            <p id="hwDesc" style="color: var(--text-muted); font-size: 0.85rem;"></p>
-          </div>
-          <div style="display: flex; gap: 10px;">
-            <button class="btn" style="background: #f59e0b; color: #111;" onclick="quarantineHomeworkLive()">📦 Move Flagged to Archive</button>
-            <button class="btn btn-danger" onclick="exportCleanupScript()">📥 Export cleanup_homework.sh</button>
-          </div>
+    <!-- Homework / Documents Review -->
+    <section id="tab-homework" class="tab-pane" onscroll="handleHomeworkScroll(event)">
+      <div class="control-bar">
+        <div class="search-field">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+          <input type="text" id="hwSearchInput" class="search-input" placeholder="Search flagged captions, dates, or photo IDs..." oninput="handleHomeworkFilter()">
+          <span class="kbd-hint">/</span>
         </div>
-        <div id="homeworkGrid" class="photo-grid"></div>
+
+        <select id="hwYearFilter" class="select-ctrl" onchange="handleHomeworkFilter()" aria-label="Filter documents by year">
+          <option value="">All Years</option>
+        </select>
+
+        <select id="hwSortOrder" class="select-ctrl" onchange="handleHomeworkFilter()" aria-label="Sort documents">
+          <option value="newest">Newest First</option>
+          <option value="oldest">Oldest First</option>
+        </select>
+
+        <div id="hwStatus" class="result-status">0 documents</div>
       </div>
-    </div>
+
+      <div class="notice-banner">
+        <div>
+          <h3 class="notice-title">Flagged Documents, Notebooks &amp; Screenshots</h3>
+          <p class="notice-desc" id="hwDesc">Files classified as study notes or documents are hidden from the main photo exhibition so memories stay uncluttered.</p>
+        </div>
+        <span class="readonly-badge">Quarantine in Memory Setup Control Center</span>
+      </div>
+      <div id="homeworkGrid" class="grid-wrap"></div>
+      <div id="homeworkLoadMoreRow" class="load-more-row" style="display: none;">
+        <button class="btn btn-outline" onclick="renderNextHomeworkBatch()" type="button">Load More Documents</button>
+      </div>
+    </section>
   </main>
 
-  <div id="lightbox" class="lightbox" onclick="closeLightbox(event)">
-    <div class="lightbox-content" onclick="event.stopPropagation()">
-      <div class="lightbox-img-wrap">
-        <img id="lightboxImg" src="" alt="">
+  <!-- Unified Theater Lightbox (Photos + Videos) -->
+  <div id="lightbox" onclick="closeLightbox(event)" role="dialog" aria-modal="true" aria-label="Media lightbox">
+    <div class="lightbox-panel" onclick="event.stopPropagation()">
+      <button class="close-btn" onclick="closeLightbox()" type="button" aria-label="Close lightbox">&times;</button>
+
+      <div class="lb-stage">
+        <button id="lbPrevBtn" class="lb-nav-btn lb-nav-prev" onclick="stepLightbox(-1)" type="button" aria-label="Previous item">&#8249;</button>
+
+        <img id="lightboxImg" src="" alt="" style="display: none;">
+        <video id="lightboxVideo" controls playsinline preload="metadata" style="display: none;"></video>
+
+        <div id="videoFallbackCard" class="lb-fallback-card">
+          <div class="lb-fallback-icon">
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="23 7 16 12 23 17 23 7"></polygon><rect x="1" y="5" width="15" height="14" rx="2"></rect></svg>
+          </div>
+          <h3 id="fbTitle">External Player Recommended</h3>
+          <p id="fbMessage">This video format cannot be decoded inline inside the browser.</p>
+          <div style="display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; margin-top: 6px;">
+            <button class="btn" onclick="openCurrentVideoExternally()" type="button">Open in System Player</button>
+            <a id="fbDownloadLink" class="btn btn-outline" href="#" download style="color: #F4F0E8; border-color: rgba(244,240,232,0.28); background: transparent;">Download File</a>
+          </div>
+        </div>
+
+        <button id="lbNextBtn" class="lb-nav-btn lb-nav-next" onclick="stepLightbox(1)" type="button" aria-label="Next item">&#8250;</button>
       </div>
-      <div class="lightbox-sidebar">
-        <button class="close-btn" onclick="closeLightbox()">&times;</button>
-        <h3 id="lbTitle" style="font-size: 1.1rem; line-height: 1.4; color: #fff;"></h3>
-        <p id="lbMeta" style="color: var(--text-muted); font-size: 0.85rem;">Date • Location</p>
-        <div style="background: rgba(255,255,255,0.03); border: 1px solid var(--border); padding: 12px; border-radius: 8px;">
-          <h4 style="font-size: 0.85rem; color: #60a5fa; margin-bottom: 6px;">Vision AI Description</h4>
-          <p id="lbDesc" style="font-size: 0.85rem; line-height: 1.5; color: var(--text);"></p>
+
+      <aside class="lb-sidebar">
+        <div class="lb-top-row">
+          <span class="lb-kicker" id="lbKicker">Archival Photograph</span>
+          <span class="lb-counter" id="lbCounter"></span>
         </div>
-        <div>
-          <h4 style="font-size: 0.85rem; color: #60a5fa; margin-bottom: 4px;">Camera / EXIF</h4>
-          <p id="lbCamera" style="font-size: 0.8rem; color: var(--text-muted);"></p>
+
+        <h2 class="lb-title" id="lbTitle">Memory Details</h2>
+
+        <div class="lb-desc-box" id="lbDesc"></div>
+
+        <div class="lb-kv-list">
+          <div class="lb-kv">
+            <span class="lb-kv-label">Date</span>
+            <span class="lb-kv-val" id="lbDate">-</span>
+          </div>
+          <div class="lb-kv" id="lbLocRow">
+            <span class="lb-kv-label">Location</span>
+            <span class="lb-kv-val" id="lbLoc">-</span>
+          </div>
+          <div class="lb-kv">
+            <span class="lb-kv-label" id="lbEquipLabel">Camera</span>
+            <span class="lb-kv-val" id="lbCamera">-</span>
+          </div>
+          <div class="lb-kv">
+            <span class="lb-kv-label">Source File</span>
+            <span class="lb-kv-val" id="lbPath">-</span>
+          </div>
         </div>
-        <div style="margin-top: auto;">
-          <p id="lbPath" style="font-size: 0.75rem; color: var(--text-muted); font-family: monospace; word-break: break-all;"></p>
+
+        <div class="lb-actions">
+          <button id="lbOpenSysBtn" class="btn" onclick="openCurrentVideoExternally()" type="button" style="display: none;">Open in System Player</button>
+          <a id="lbDownloadBtn" class="btn btn-outline" href="#" target="_blank" rel="noopener">Open Original File</a>
         </div>
-      </div>
+      </aside>
     </div>
   </div>
 
-  <div id="peopleManagerModal" class="manager-modal" onclick="closePeopleManager(event)">
-    <div class="manager-box" onclick="event.stopPropagation()">
-      <div class="manager-header">
-        <h3 style="font-size: 1.1rem; color: #fff;">⚙️ Manage, Rename &amp; Merge People</h3>
-        <button class="close-btn" onclick="closePeopleManager()">&times;</button>
-      </div>
-      <div class="manager-body">
-        <div class="manager-section">
-          <h4>🔀 Merge Two Clusters</h4>
-          <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 12px;">
-            If the AI split the same person into multiple clusters, select the source cluster to absorb into the target cluster.
-          </p>
-          <div class="merge-controls">
-            <select id="mergeSourceSelect"></select>
-            <span style="color: var(--text-muted);">➔</span>
-            <select id="mergeTargetSelect"></select>
-            <button class="btn" onclick="executeClusterMerge()">Merge</button>
-          </div>
-        </div>
-
-        <div class="manager-section">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-            <h4>✏️ Personal Naming</h4>
-            <button class="btn btn-secondary" style="font-size: 0.8rem;" onclick="saveCustomNames()">Save Names</button>
-          </div>
-          <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 12px;">
-            Assign human names (e.g. "Nikunj", "Dad", "Mom") to replace generic numbers. Changes save directly to SQLite when running the local server.
-          </p>
-          <div style="max-height: 240px; overflow-y: auto;">
-            <table class="naming-table">
-              <thead>
-                <tr>
-                  <th style="width: 50px;">Avatar</th>
-                  <th style="width: 70px;">Cluster</th>
-                  <th style="width: 80px;">Photos</th>
-                  <th>Assigned Name</th>
-                </tr>
-              </thead>
-              <tbody id="namingTableBody"></tbody>
-            </table>
-          </div>
-        </div>
-
-        <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid var(--border); padding-top: 16px;">
-          <span style="font-size: 0.8rem; color: var(--text-muted);">Offline script fallback (if opened outside local server):</span>
-          <button class="btn" style="background: #10b981;" onclick="exportMergeCommitScript()">💾 Export commit_merges.py</button>
-        </div>
-      </div>
-    </div>
-  </div>
+  <div id="toast" role="status" aria-live="polite"></div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="catalog_data.js"></script>
   <script>
-    let filteredList = [];
-    let displayedCount = 0;
     const BATCH_SIZE = 60;
+
+    // Photo state
+    let filteredPhotos = [];
+    let displayedPhotos = 0;
     let selectedPersonId = null;
     let selectedCity = null;
-    let customNamesMap = {};
-    let pendingMerges = [];
 
-    function handleImgError(img, p, orig) {
-      if (!img.dataset.step) {
-        img.dataset.step = "1";
-        img.src = p.startsWith('../') ? p.substring(3) : '../' + p;
-      } else if (img.dataset.step === "1") {
-        img.dataset.step = "2";
-        img.src = orig;
-      } else if (img.dataset.step === "2") {
-        img.dataset.step = "3";
-        img.src = orig.startsWith('../') ? orig.substring(3) : '../' + orig;
+    // Video state
+    let filteredVideos = [];
+    let displayedVideos = 0;
+    let selectedVideoFmt = 'all';
+    let hideLivePhotos = false;
+
+    // Homework state (paginated & lazy-rendered so large archives never stall)
+    let allHomework = [];
+    let filteredHomework = [];
+    let displayedHomework = 0;
+    let homeworkInitialized = false;
+
+    // Lightbox state
+    let lbMode = 'photo';
+    let lbIndex = -1;
+    let currentVideoItem = null;
+
+    function syncThemeControls(theme) {
+      const icon = document.getElementById('themeIcon');
+      const label = document.getElementById('themeLabel');
+      if (!icon || !label) return;
+      if (theme === 'dark') {
+        icon.textContent = '☀️';
+        label.textContent = 'Daylight';
+      } else {
+        icon.textContent = '🌙';
+        label.textContent = 'Darkroom';
       }
+    }
+
+    function toggleTheme() {
+      const root = document.documentElement;
+      const next = root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      root.setAttribute('data-theme', next);
+      syncThemeControls(next);
+      try { localStorage.setItem('museum_theme', next); } catch (_) {}
+    }
+
+    let toastTimer = null;
+    function showToast(msg) {
+      const el = document.getElementById('toast');
+      el.textContent = msg;
+      el.classList.add('show');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => el.classList.remove('show'), 3600);
     }
 
     function escapeHtml(str) {
@@ -459,26 +1343,128 @@
         .replace(/'/g, '&#39;');
     }
 
-    window.addEventListener('DOMContentLoaded', () => {
-      if (typeof ALL_PHOTOS !== 'undefined') {
-        document.getElementById('mTotal').innerText = ALL_PHOTOS.length.toLocaleString();
-        if (typeof MAP_LOCATIONS !== 'undefined') {
-          document.getElementById('mCities').innerText = MAP_LOCATIONS.length.toLocaleString();
-        }
-        const clusters = getAllClusters();
-        document.getElementById('mClusters').innerText = clusters.length.toLocaleString();
+    function escapeAttrJs(str) {
+      return escapeHtml(String(str || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'"));
+    }
 
-        const hwItems = ALL_PHOTOS.filter(p => p.hw);
-        document.getElementById('mHw').innerText = hwItems.length.toLocaleString();
-        document.getElementById('hwBadge').innerText = hwItems.length.toLocaleString();
-        document.getElementById('hwDesc').innerText = `These ${hwItems.length.toLocaleString()} photos were detected as notebooks, textbook pages, math equations, or screenshots.`;
+    function formatBytes(bytes) {
+      const n = Number(bytes || 0);
+      if (n <= 0) return '—';
+      const units = ['B', 'KB', 'MB', 'GB'];
+      let idx = 0;
+      let val = n;
+      while (val >= 1024 && idx < units.length - 1) {
+        val /= 1024;
+        idx++;
+      }
+      return `${val.toFixed(idx >= 2 ? 1 : 0)} ${units[idx]}`;
+    }
 
-        filteredList = ALL_PHOTOS.filter(p => !p.hw);
-        renderNextBatch();
-        renderPeople();
-        renderHomework(hwItems);
+    function normalizeRelPath(raw) {
+      return String(raw || '').replace(/^\.\.\//, '').replace(/^\.\//, '');
+    }
+
+    function handleImgError(imgEl, pPath, origPath) {
+      const step = parseInt(imgEl.dataset.step || '0', 10);
+      const cleanOrig = normalizeRelPath(origPath);
+      const tries = [
+        pPath,
+        origPath,
+        '../' + cleanOrig,
+        cleanOrig,
+        '.processing_cache/' + pPath.split('/').pop(),
+        '../.processing_cache/' + pPath.split('/').pop()
+      ];
+      const nextStep = step + 1;
+      if (nextStep < tries.length) {
+        imgEl.dataset.step = String(nextStep);
+        imgEl.src = tries[nextStep];
       } else {
-        document.getElementById('photoGrid').innerHTML = '<div style="padding: 30px; color: #ef4444;">Error: catalog_data.js could not be loaded.</div>';
+        imgEl.onerror = null;
+        imgEl.src = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='320' height='240'><rect width='320' height='240' fill='%23E7E2D8'/><text x='50%' y='50%' dominant-baseline='middle' text-anchor='middle' fill='%23847D72' font-family='sans-serif' font-size='13'>Preview unavailable</text></svg>";
+      }
+    }
+
+    function populateYearSelect(selectId, items) {
+      const sel = document.getElementById(selectId);
+      if (!sel) return;
+      const years = new Set();
+      let hasUnknown = false;
+      items.forEach(item => {
+        if (item.d && /^\d{4}/.test(item.d)) {
+          years.add(item.d.slice(0, 4));
+        } else {
+          hasUnknown = true;
+        }
+      });
+      const sorted = Array.from(years).sort((a, b) => b.localeCompare(a));
+      sel.innerHTML = '<option value="">All Years</option>' +
+        sorted.map(y => `<option value="${y}">${y}</option>`).join('') +
+        (hasUnknown ? '<option value="__unknown__">Undated</option>' : '');
+    }
+
+    window.addEventListener('DOMContentLoaded', () => {
+      syncThemeControls(document.documentElement.getAttribute('data-theme') || 'light');
+
+      const photos = typeof ALL_PHOTOS !== 'undefined' ? ALL_PHOTOS : null;
+      const videos = typeof ALL_VIDEOS !== 'undefined' ? ALL_VIDEOS : [];
+
+      if (photos !== null) {
+        const hwItems = photos.filter(p => p.hw);
+        const cleanPhotos = photos.filter(p => !p.hw);
+        const clusters = getAllClusters();
+
+        document.getElementById('mTotal').textContent = cleanPhotos.length.toLocaleString();
+        document.getElementById('photosBadge').textContent = cleanPhotos.length.toLocaleString();
+        document.getElementById('mVideos').textContent = videos.length.toLocaleString();
+        document.getElementById('videosBadge').textContent = videos.length.toLocaleString();
+        document.getElementById('mCities').textContent = (typeof MAP_LOCATIONS !== 'undefined' ? MAP_LOCATIONS.length : 0).toLocaleString();
+        document.getElementById('mClusters').textContent = clusters.length.toLocaleString();
+        document.getElementById('mHw').textContent = hwItems.length.toLocaleString();
+        document.getElementById('hwBadge').textContent = hwItems.length.toLocaleString();
+        document.getElementById('hwDesc').textContent =
+          `These ${hwItems.length.toLocaleString()} items were classified as homework, notes, textbooks, or screenshots and kept separate from your main photo exhibition.`;
+
+        populateYearSelect('photoYearFilter', cleanPhotos);
+        populateYearSelect('videoYearFilter', videos);
+        populateYearSelect('hwYearFilter', hwItems);
+
+        allHomework = hwItems;
+        filteredHomework = hwItems;
+        document.getElementById('hwStatus').textContent = `${hwItems.length.toLocaleString()} documents`;
+
+        handlePhotoSearch();
+        handleVideoFilter();
+        renderPeople();
+      } else {
+        document.getElementById('photoGrid').innerHTML =
+          '<div class="empty-state"><h3>Catalog not found</h3><p>Run <code>memory-setup sync &lt;archive&gt;</code> or generate <code>viewer/catalog_data.js</code> first.</p></div>';
+      }
+    });
+
+    window.addEventListener('keydown', (e) => {
+      const lbOpen = document.getElementById('lightbox').classList.contains('active');
+
+      if (e.key === 'Escape' && lbOpen) {
+        closeLightbox();
+        return;
+      }
+
+      if (lbOpen) {
+        if (e.key === 'ArrowLeft') { e.preventDefault(); stepLightbox(-1); }
+        if (e.key === 'ArrowRight') { e.preventDefault(); stepLightbox(1); }
+        return;
+      }
+
+      if (e.key === '/' && document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'SELECT') {
+        const galleryActive = document.getElementById('tab-gallery').classList.contains('active');
+        const videosActive = document.getElementById('tab-videos').classList.contains('active');
+        const hwActive = document.getElementById('tab-homework').classList.contains('active');
+        if (galleryActive || videosActive || hwActive) {
+          e.preventDefault();
+          const targetId = videosActive ? 'videoSearchInput' : (hwActive ? 'hwSearchInput' : 'searchInput');
+          document.getElementById(targetId).focus();
+        }
       }
     });
 
@@ -486,14 +1472,18 @@
       document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
       document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
 
-      const targetBtn = Array.from(document.querySelectorAll('.tab-btn')).find(b => {
-        const oc = b.getAttribute('onclick') || '';
-        return oc.includes(`'${tabId}'`);
-      });
+      const targetBtn = Array.from(document.querySelectorAll('.tab-btn')).find(b =>
+        (b.getAttribute('onclick') || '').includes(`'${tabId}'`)
+      );
       if (targetBtn) targetBtn.classList.add('active');
 
-      const targetPane = document.getElementById('tab-' + tabId);
-      if (targetPane) targetPane.classList.add('active');
+      const pane = document.getElementById('tab-' + tabId);
+      if (pane) pane.classList.add('active');
+
+      if (tabId === 'homework' && !homeworkInitialized) {
+        homeworkInitialized = true;
+        handleHomeworkFilter();
+      }
 
       if (tabId === 'map') {
         if (!window.mapInitialized) initMap();
@@ -501,61 +1491,379 @@
       }
     }
 
-    function renderNextBatch() {
-      const container = document.getElementById('photoGrid');
-      const nextSlice = filteredList.slice(displayedCount, displayedCount + BATCH_SIZE);
-      if (nextSlice.length === 0) {
-        document.getElementById('loadStatus').innerText = displayedCount > 0 ? `Showing all ${displayedCount.toLocaleString()} photos` : 'No photos matched your filter.';
-        return;
+    function filterAndSortPhotoList(items, query, year, sortOrder) {
+      let list = items;
+      if (year === '__unknown__') {
+        list = list.filter(p => !p.d);
+      } else if (year) {
+        list = list.filter(p => p.d && p.d.startsWith(year));
       }
 
-      const html = nextSlice.map(p => `
-        <div class="photo-card" onclick="openLightbox('${escapeHtml(p.id)}')">
-          <img class="card-thumb" src="${escapeHtml(p.p)}" onerror="handleImgError(this, '${escapeHtml(p.p)}', '${escapeHtml(p.orig)}')" loading="lazy" alt="${escapeHtml(p.c || p.id)}">
+      if (query) {
+        list = list.filter(p =>
+          (p.c && p.c.toLowerCase().includes(query)) ||
+          (p.l && p.l.toLowerCase().includes(query)) ||
+          (p.d && p.d.includes(query)) ||
+          (p.cam && p.cam.toLowerCase().includes(query)) ||
+          (p.id && p.id.toLowerCase().includes(query))
+        );
+      }
+
+      return list.slice().sort((a, b) => {
+        const da = a.d || '';
+        const db = b.d || '';
+        if (!da && !db) return a.id.localeCompare(b.id);
+        if (!da) return 1;
+        if (!db) return -1;
+        return sortOrder === 'oldest' ? da.localeCompare(db) : db.localeCompare(da);
+      });
+    }
+
+    function buildPhotoCardHtml(p, onClickExpr, fallbackTitle, metaLeft, metaRight) {
+      return `
+        <div class="media-card" onclick="${onClickExpr}">
+          <div class="card-frame">
+            <img class="card-thumb" src="${escapeHtml(p.p)}" onerror="handleImgError(this, '${escapeAttrJs(p.p)}', '${escapeAttrJs(p.orig)}')" loading="lazy" decoding="async" alt="${escapeHtml(p.c || p.id)}">
+            ${p.d ? `<span class="card-date-pill">${escapeHtml(p.d)}</span>` : ''}
+          </div>
           <div class="card-info">
-            <div class="card-title">${escapeHtml(p.c || p.id)}</div>
+            <div class="card-title">${escapeHtml(p.c || fallbackTitle)}</div>
             <div class="card-meta">
-              <span>${escapeHtml(p.d || 'Unknown Date')}</span>
-              <span>${escapeHtml(p.l || p.cam || '')}</span>
+              <span>${escapeHtml(metaLeft)}</span>
+              <span>${escapeHtml(metaRight)}</span>
             </div>
           </div>
         </div>
-      `).join('');
+      `;
+    }
+
+    /* ---------- PHOTOS ---------- */
+    function handlePhotoSearch() {
+      if (typeof ALL_PHOTOS === 'undefined') return;
+      const q = (document.getElementById('searchInput').value || '').toLowerCase().trim();
+      const year = document.getElementById('photoYearFilter').value;
+      const sortOrder = document.getElementById('photoSortOrder').value;
+
+      let list = ALL_PHOTOS.filter(p => !p.hw);
+      if (selectedPersonId !== null) list = list.filter(p => p.f && p.f.includes(selectedPersonId));
+      if (selectedCity !== null) list = list.filter(p => p.l && p.l.toLowerCase().includes(selectedCity.toLowerCase()));
+
+      filteredPhotos = filterAndSortPhotoList(list, q, year, sortOrder);
+
+      document.getElementById('photoGrid').innerHTML = '';
+      displayedPhotos = 0;
+      renderNextPhotoBatch();
+    }
+
+    function renderNextPhotoBatch() {
+      const container = document.getElementById('photoGrid');
+      const loadMoreRow = document.getElementById('photoLoadMoreRow');
+      const nextSlice = filteredPhotos.slice(displayedPhotos, displayedPhotos + BATCH_SIZE);
+
+      if (nextSlice.length === 0) {
+        if (displayedPhotos === 0) {
+          container.innerHTML = '<div class="empty-state"><h3>No matching photographs</h3><p>Try clearing a search term or switching the active year or person filter.</p></div>';
+          document.getElementById('loadStatus').textContent = '0 photos matched';
+        } else {
+          document.getElementById('loadStatus').textContent = `Showing all ${displayedPhotos.toLocaleString()} photos`;
+        }
+        loadMoreRow.style.display = 'none';
+        return;
+      }
+
+      const startIdx = displayedPhotos;
+      const html = nextSlice.map((p, offset) =>
+        buildPhotoCardHtml(
+          p,
+          `openPhotoLightbox(${startIdx + offset})`,
+          `Untitled photograph (${p.id})`,
+          p.l || 'No GPS',
+          p.cam || p.id
+        )
+      ).join('');
 
       container.insertAdjacentHTML('beforeend', html);
-      displayedCount += nextSlice.length;
-      document.getElementById('loadStatus').innerText = `Showing ${displayedCount.toLocaleString()} of ${filteredList.length.toLocaleString()} photos`;
+      displayedPhotos += nextSlice.length;
+      document.getElementById('loadStatus').textContent =
+        `Showing ${displayedPhotos.toLocaleString()} of ${filteredPhotos.length.toLocaleString()} photos`;
+      loadMoreRow.style.display = displayedPhotos < filteredPhotos.length ? 'flex' : 'none';
     }
 
-    function handleScroll(e) {
+    function handlePhotoScroll(e) {
       const el = e.target;
-      if (el.scrollHeight - el.scrollTop <= el.clientHeight + 400) {
-        if (displayedCount < filteredList.length) renderNextBatch();
+      if (el.scrollHeight - el.scrollTop <= el.clientHeight + 480) {
+        if (displayedPhotos < filteredPhotos.length) renderNextPhotoBatch();
       }
     }
 
-    function handleSearch() {
-      const q = document.getElementById('searchInput').value.toLowerCase().trim();
-      let baseList = ALL_PHOTOS.filter(p => !p.hw);
-      if (selectedPersonId !== null) baseList = baseList.filter(p => p.f && p.f.includes(selectedPersonId));
-      if (selectedCity !== null) baseList = baseList.filter(p => p.l && p.l.toLowerCase().includes(selectedCity.toLowerCase()));
+    /* ---------- VIDEOS ---------- */
+    function setVideoFormat(fmt, btnEl) {
+      selectedVideoFmt = fmt;
+      document.querySelectorAll('#tab-videos .filter-chip[data-fmt]').forEach(b => b.classList.remove('active'));
+      if (btnEl) btnEl.classList.add('active');
+      handleVideoFilter();
+    }
 
-      if (!q) {
-        filteredList = baseList;
-      } else {
-        filteredList = baseList.filter(p =>
-          (p.c && p.c.toLowerCase().includes(q)) ||
-          (p.l && p.l.toLowerCase().includes(q)) ||
-          (p.d && p.d.includes(q)) ||
-          (p.cam && p.cam.toLowerCase().includes(q)) ||
-          (p.id && p.id.toLowerCase().includes(q))
+    function toggleHideLivePhotos() {
+      hideLivePhotos = !hideLivePhotos;
+      document.getElementById('livePhotoToggle').classList.toggle('active', hideLivePhotos);
+      handleVideoFilter();
+    }
+
+    function handleVideoFilter() {
+      const videos = typeof ALL_VIDEOS !== 'undefined' ? ALL_VIDEOS : [];
+      const q = (document.getElementById('videoSearchInput').value || '').toLowerCase().trim();
+      const year = document.getElementById('videoYearFilter').value;
+
+      let list = videos;
+      if (selectedVideoFmt !== 'all') {
+        list = list.filter(v => (v.ext || '').toLowerCase() === selectedVideoFmt);
+      }
+      if (hideLivePhotos) {
+        list = list.filter(v => !v.live);
+      }
+      if (year === '__unknown__') {
+        list = list.filter(v => !v.d);
+      } else if (year) {
+        list = list.filter(v => v.d && v.d.startsWith(year));
+      }
+      if (q) {
+        list = list.filter(v =>
+          (v.fn && v.fn.toLowerCase().includes(q)) ||
+          (v.d && v.d.includes(q)) ||
+          (v.ext && v.ext.toLowerCase().includes(q)) ||
+          (v.id && v.id.toLowerCase().includes(q))
         );
       }
-      document.getElementById('photoGrid').innerHTML = '';
-      displayedCount = 0;
-      renderNextBatch();
+
+      filteredVideos = list;
+      document.getElementById('videoGrid').innerHTML = '';
+      displayedVideos = 0;
+      renderNextVideoBatch();
     }
 
+    function renderNextVideoBatch() {
+      const container = document.getElementById('videoGrid');
+      const loadMoreRow = document.getElementById('videoLoadMoreRow');
+      const totalBytes = filteredVideos.reduce((acc, v) => acc + (Number(v.sz) || 0), 0);
+      const nextSlice = filteredVideos.slice(displayedVideos, displayedVideos + BATCH_SIZE);
+
+      if (nextSlice.length === 0) {
+        if (displayedVideos === 0) {
+          container.innerHTML = '<div class="empty-state"><h3>No matching videos</h3><p>Try switching format filter or adjusting search criteria.</p></div>';
+          document.getElementById('videoStatus').textContent = '0 videos matched';
+        } else {
+          document.getElementById('videoStatus').textContent =
+            `${displayedVideos.toLocaleString()} videos • ${formatBytes(totalBytes)}`;
+        }
+        loadMoreRow.style.display = 'none';
+        return;
+      }
+
+      const startIdx = displayedVideos;
+      const html = nextSlice.map((v, offset) => {
+        const extLabel = (v.ext || '.vid').replace(/^\./, '').toUpperCase();
+        const isAvi = (v.ext || '').toLowerCase() === '.avi';
+        return `
+          <div class="media-card" onclick="openVideoLightbox(${startIdx + offset})">
+            <div class="video-frame">
+              <div class="video-play-orb" aria-hidden="true">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><polygon points="6 4 20 12 6 20 6 4"></polygon></svg>
+              </div>
+              <div class="video-corner-badges">
+                ${v.live ? '<span class="fmt-badge live">LIVE</span>' : ''}
+                <span class="fmt-badge ${isAvi ? 'avi' : ''}">${escapeHtml(extLabel)}</span>
+              </div>
+              <span class="video-size-pill">${formatBytes(v.sz)}</span>
+            </div>
+            <div class="card-info">
+              <div class="card-title">${escapeHtml(v.fn || v.id)}</div>
+              <div class="card-meta">
+                <span>${escapeHtml(v.d || 'Undated')}</span>
+                <span>${isAvi ? 'Open in System Player' : 'Inline Stream'}</span>
+              </div>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      container.insertAdjacentHTML('beforeend', html);
+      displayedVideos += nextSlice.length;
+      document.getElementById('videoStatus').textContent =
+        `Showing ${displayedVideos.toLocaleString()} of ${filteredVideos.length.toLocaleString()} • ${formatBytes(totalBytes)}`;
+      loadMoreRow.style.display = displayedVideos < filteredVideos.length ? 'flex' : 'none';
+    }
+
+    function handleVideoScroll(e) {
+      const el = e.target;
+      if (el.scrollHeight - el.scrollTop <= el.clientHeight + 480) {
+        if (displayedVideos < filteredVideos.length) renderNextVideoBatch();
+      }
+    }
+
+    /* ---------- LIGHTBOX ---------- */
+    function resetLightboxMedia() {
+      const img = document.getElementById('lightboxImg');
+      const vid = document.getElementById('lightboxVideo');
+      const fb = document.getElementById('videoFallbackCard');
+      img.style.display = 'none';
+      img.removeAttribute('src');
+      vid.pause();
+      vid.style.display = 'none';
+      vid.onerror = null;
+      vid.removeAttribute('src');
+      vid.load();
+      fb.classList.remove('active');
+    }
+
+    function openPhotoById(id) {
+      let idx = filteredPhotos.findIndex(x => x.id === id);
+      if (idx >= 0) {
+        openPhotoLightbox(idx, filteredPhotos);
+        return;
+      }
+      const fallbackItem = (typeof ALL_PHOTOS !== 'undefined' ? ALL_PHOTOS : []).find(x => x.id === id);
+      if (fallbackItem) {
+        openPhotoLightbox(0, [fallbackItem]);
+      }
+    }
+
+    let lbCustomCollection = null;
+
+    function openPhotoLightbox(index, collectionOverride = null) {
+      const list = collectionOverride || filteredPhotos;
+      if (!list || index < 0 || index >= list.length) return;
+      lbMode = 'photo';
+      lbCustomCollection = collectionOverride;
+      lbIndex = index;
+      currentVideoItem = null;
+
+      const p = list[index];
+      resetLightboxMedia();
+
+      const imgEl = document.getElementById('lightboxImg');
+      imgEl.style.display = 'block';
+      imgEl.dataset.step = '';
+      imgEl.src = p.p;
+      imgEl.onerror = () => handleImgError(imgEl, p.p, p.orig);
+
+      document.getElementById('lbKicker').textContent = p.hw ? 'Flagged Document' : 'Archival Photograph';
+      document.getElementById('lbCounter').textContent = `${(index + 1).toLocaleString()} / ${list.length.toLocaleString()}`;
+      document.getElementById('lbTitle').textContent = p.c || p.id;
+      document.getElementById('lbDesc').textContent = p.c || 'No AI caption recorded yet for this photograph.';
+      document.getElementById('lbDate').textContent = p.d || 'Unknown Date';
+      document.getElementById('lbLocRow').style.display = 'flex';
+      document.getElementById('lbLoc').textContent = p.l || 'No GPS metadata';
+      document.getElementById('lbEquipLabel').textContent = 'Camera';
+      document.getElementById('lbCamera').textContent = p.cam || 'Unknown Camera';
+      document.getElementById('lbPath').textContent = p.orig;
+
+      document.getElementById('lbOpenSysBtn').style.display = 'none';
+      const dlBtn = document.getElementById('lbDownloadBtn');
+      dlBtn.textContent = 'Open Original Photo';
+      dlBtn.href = p.orig;
+      dlBtn.removeAttribute('download');
+
+      document.getElementById('lbPrevBtn').disabled = index <= 0;
+      document.getElementById('lbNextBtn').disabled = index >= list.length - 1;
+      document.getElementById('lightbox').classList.add('active');
+    }
+
+    function openVideoLightbox(index) {
+      if (!filteredVideos || index < 0 || index >= filteredVideos.length) return;
+      lbMode = 'video';
+      lbCustomCollection = null;
+      lbIndex = index;
+
+      const v = filteredVideos[index];
+      currentVideoItem = v;
+      resetLightboxMedia();
+
+      const extLower = (v.ext || '').toLowerCase();
+      const extLabel = extLower.replace(/^\./, '').toUpperCase() || 'VIDEO';
+      const isAvi = extLower === '.avi';
+
+      document.getElementById('lbKicker').textContent = v.live ? `Live Photo Clip • ${extLabel}` : `Archive Video • ${extLabel}`;
+      document.getElementById('lbCounter').textContent = `${(index + 1).toLocaleString()} / ${filteredVideos.length.toLocaleString()}`;
+      document.getElementById('lbTitle').textContent = v.fn || v.id;
+      document.getElementById('lbDesc').textContent = isAvi
+        ? 'Legacy .avi container detected. Use "Open in System Player" (QuickTime/VLC/Default App) or download the file to play with full codec support.'
+        : 'Streaming directly from your local archive via HTTP byte-range support.';
+      document.getElementById('lbDate').textContent = v.d || 'Undated';
+      document.getElementById('lbLocRow').style.display = 'none';
+      document.getElementById('lbEquipLabel').textContent = 'Format / Size';
+      document.getElementById('lbCamera').textContent = `${extLabel} • ${formatBytes(v.sz)}`;
+      document.getElementById('lbPath').textContent = v.src;
+
+      document.getElementById('lbOpenSysBtn').style.display = 'inline-flex';
+      const dlBtn = document.getElementById('lbDownloadBtn');
+      dlBtn.textContent = 'Download Video';
+      dlBtn.href = v.src;
+      dlBtn.setAttribute('download', v.fn || '');
+
+      const fb = document.getElementById('videoFallbackCard');
+      const vid = document.getElementById('lightboxVideo');
+      document.getElementById('fbDownloadLink').href = v.src;
+      document.getElementById('fbDownloadLink').setAttribute('download', v.fn || '');
+
+      if (isAvi) {
+        document.getElementById('fbTitle').textContent = 'Legacy AVI Video';
+        document.getElementById('fbMessage').textContent =
+          `${v.fn || v.id} (${formatBytes(v.sz)}) uses .avi which browsers do not stream natively. Open it in your system player or download a copy.`;
+        fb.classList.add('active');
+      } else {
+        vid.style.display = 'block';
+        vid.src = v.src;
+        vid.onerror = () => {
+          vid.style.display = 'none';
+          document.getElementById('fbTitle').textContent = 'Browser Codec Unavailable';
+          document.getElementById('fbMessage').textContent =
+            `Your browser could not decode ${v.fn || v.id} inline. Open it in your system media player instead.`;
+          fb.classList.add('active');
+        };
+      }
+
+      document.getElementById('lbPrevBtn').disabled = index <= 0;
+      document.getElementById('lbNextBtn').disabled = index >= filteredVideos.length - 1;
+      document.getElementById('lightbox').classList.add('active');
+    }
+
+    function stepLightbox(delta) {
+      if (lbMode === 'video') {
+        openVideoLightbox(lbIndex + delta);
+      } else {
+        openPhotoLightbox(lbIndex + delta, lbCustomCollection);
+      }
+    }
+
+    function closeLightbox(e) {
+      if (!e || e.target.id === 'lightbox' || e.target.classList.contains('close-btn')) {
+        resetLightboxMedia();
+        currentVideoItem = null;
+        document.getElementById('lightbox').classList.remove('active');
+      }
+    }
+
+    async function openCurrentVideoExternally() {
+      if (!currentVideoItem) return;
+      try {
+        const res = await fetch('/api/open-media', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path: currentVideoItem.src })
+        });
+        const data = await res.json();
+        if (res.ok && data.ok) {
+          showToast(`Opened "${data.opened}" in your system player.`);
+          return;
+        }
+        showToast(data.error || 'Could not launch system player.');
+      } catch (_) {
+        showToast('Launch via start_viewer or use Download File to open locally.');
+      }
+    }
+
+    /* ---------- PEOPLE / PLACES / DOCS ---------- */
     function filterByPerson(clusterId, name) {
       if (selectedPersonId === clusterId) {
         selectedPersonId = null;
@@ -566,30 +1874,30 @@
         showFilterTag(`Person: ${name}`, () => {
           selectedPersonId = null;
           clearFilterTag();
-          handleSearch();
+          handlePhotoSearch();
         });
       }
       switchTab('gallery');
-      handleSearch();
+      handlePhotoSearch();
     }
 
     function filterByCity(cityName) {
       selectedCity = cityName;
       selectedPersonId = null;
-      showFilterTag(`City: ${cityName}`, () => {
+      showFilterTag(`Place: ${cityName}`, () => {
         selectedCity = null;
         clearFilterTag();
-        handleSearch();
+        handlePhotoSearch();
       });
       switchTab('gallery');
-      handleSearch();
+      handlePhotoSearch();
     }
 
     function showFilterTag(label, onClear) {
       const tag = document.getElementById('activeFilterTag');
-      tag.innerHTML = `<span>${escapeHtml(label)}</span> <span class="clear">&times;</span>`;
-      tag.style.display = 'flex';
-      tag.querySelector('.clear').onclick = onClear;
+      tag.innerHTML = `<span>${escapeHtml(label)}</span><button type="button" aria-label="Clear filter">&times;</button>`;
+      tag.style.display = 'inline-flex';
+      tag.querySelector('button').onclick = onClear;
     }
 
     function clearFilterTag() {
@@ -599,44 +1907,90 @@
     }
 
     function getClusterName(c) {
-      return customNamesMap[c.id] || c.name;
+      return c.name;
+    }
+
+    function getAllClusters() {
+      const all = [];
+      if (typeof CORE_CLUSTERS !== 'undefined') all.push(...CORE_CLUSTERS);
+      if (typeof EXTENDED_CLUSTERS !== 'undefined') all.push(...EXTENDED_CLUSTERS);
+      return all;
     }
 
     function renderPeople() {
       if (typeof CORE_CLUSTERS === 'undefined') return;
-      const fallbackSvg = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='96' height='96'><rect width='96' height='96' fill='%23334155'/><text x='50%' y='55%' dominant-baseline='middle' text-anchor='middle' fill='white' font-size='32'>👤</text></svg>";
-      const coreGrid = document.getElementById('corePeopleGrid');
-      coreGrid.innerHTML = CORE_CLUSTERS.filter(c => c.count > 0).map(c => `
-        <div class="person-card ${selectedPersonId === c.id ? 'active-filter' : ''}" onclick="filterByPerson(${c.id}, '${escapeHtml(getClusterName(c))}')">
-          <img class="person-avatar" src="avatars/cluster_${c.id}.jpg" onerror="this.src='${fallbackSvg}'">
+      const fallbackSvg = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='96' height='96'><rect width='96' height='96' fill='%23E7E2D8'/><circle cx='48' cy='38' r='16' fill='%23847D72'/><path d='M20 82c4-16 18-24 28-24s24 8 28 24' fill='%23847D72'/></svg>";
+
+      const renderCard = (c) => `
+        <div class="person-card ${selectedPersonId === c.id ? 'active-filter' : ''}" onclick="filterByPerson(${c.id}, '${escapeAttrJs(getClusterName(c))}')">
+          <img class="person-avatar" src="avatars/cluster_${c.id}.jpg" onerror="this.onerror=null; this.src='${fallbackSvg}'" alt="${escapeHtml(getClusterName(c))}">
           <div class="person-name">${escapeHtml(getClusterName(c))}</div>
           <div class="person-count">${c.count.toLocaleString()} photos</div>
         </div>
-      `).join('');
+      `;
 
+      document.getElementById('corePeopleGrid').innerHTML = CORE_CLUSTERS.filter(c => c.count > 0).map(renderCard).join('');
       if (typeof EXTENDED_CLUSTERS !== 'undefined') {
-        const extGrid = document.getElementById('extendedPeopleGrid');
-        extGrid.innerHTML = EXTENDED_CLUSTERS.filter(c => c.count > 0).map(c => `
-          <div class="person-card ${selectedPersonId === c.id ? 'active-filter' : ''}" onclick="filterByPerson(${c.id}, '${escapeHtml(getClusterName(c))}')">
-            <img class="person-avatar" src="avatars/cluster_${c.id}.jpg" onerror="this.src='${fallbackSvg}'">
-            <div class="person-name">${escapeHtml(getClusterName(c))}</div>
-            <div class="person-count">${c.count.toLocaleString()} photos</div>
-          </div>
-        `).join('');
+        document.getElementById('extendedPeopleGrid').innerHTML = EXTENDED_CLUSTERS.filter(c => c.count > 0).map(renderCard).join('');
       }
     }
 
-    function renderHomework(items) {
+    function handleHomeworkFilter() {
+      const q = (document.getElementById('hwSearchInput')?.value || '').toLowerCase().trim();
+      const year = document.getElementById('hwYearFilter')?.value || '';
+      const sortOrder = document.getElementById('hwSortOrder')?.value || 'newest';
+
+      filteredHomework = filterAndSortPhotoList(allHomework, q, year, sortOrder);
+      document.getElementById('homeworkGrid').innerHTML = '';
+      displayedHomework = 0;
+      renderNextHomeworkBatch();
+    }
+
+    function renderNextHomeworkBatch() {
       const grid = document.getElementById('homeworkGrid');
-      grid.innerHTML = items.map(p => `
-        <div class="photo-card" onclick="openLightbox('${escapeHtml(p.id)}')">
-          <img class="card-thumb" src="${escapeHtml(p.p)}" onerror="handleImgError(this, '${escapeHtml(p.p)}', '${escapeHtml(p.orig)}')" loading="lazy" alt="${escapeHtml(p.c || p.id)}">
-          <div class="card-info">
-            <div class="card-title">${escapeHtml(p.c || p.id)}</div>
-            <div class="card-meta"><span>${escapeHtml(p.d || 'Unknown Date')}</span><span>📝 Document/Homework</span></div>
-          </div>
-        </div>
-      `).join('');
+      const loadMoreRow = document.getElementById('homeworkLoadMoreRow');
+      const statusEl = document.getElementById('hwStatus');
+      const nextSlice = filteredHomework.slice(displayedHomework, displayedHomework + BATCH_SIZE);
+
+      if (nextSlice.length === 0) {
+        if (displayedHomework === 0) {
+          grid.innerHTML = allHomework.length === 0
+            ? '<div class="empty-state"><h3>No flagged documents</h3><p>Everything in your archive is curated as a memory.</p></div>'
+            : '<div class="empty-state"><h3>No matching documents</h3><p>Try clearing the search query or selecting All Years.</p></div>';
+          if (statusEl) statusEl.textContent = '0 documents matched';
+        } else if (statusEl) {
+          statusEl.textContent = `Showing all ${displayedHomework.toLocaleString()} documents`;
+        }
+        if (loadMoreRow) loadMoreRow.style.display = 'none';
+        return;
+      }
+
+      const startIdx = displayedHomework;
+      const html = nextSlice.map((p, offset) =>
+        buildPhotoCardHtml(
+          p,
+          `openPhotoLightbox(${startIdx + offset}, filteredHomework)`,
+          p.id,
+          'Flagged Document',
+          p.id
+        )
+      ).join('');
+
+      grid.insertAdjacentHTML('beforeend', html);
+      displayedHomework += nextSlice.length;
+      if (statusEl) {
+        statusEl.textContent = `Showing ${displayedHomework.toLocaleString()} of ${filteredHomework.length.toLocaleString()} documents`;
+      }
+      if (loadMoreRow) {
+        loadMoreRow.style.display = displayedHomework < filteredHomework.length ? 'flex' : 'none';
+      }
+    }
+
+    function handleHomeworkScroll(e) {
+      const el = e.target;
+      if (el.scrollHeight - el.scrollTop <= el.clientHeight + 480) {
+        if (displayedHomework < filteredHomework.length) renderNextHomeworkBatch();
+      }
     }
 
     function initMap() {
@@ -649,195 +2003,26 @@
 
       const map = L.map('map', { center: [25.0, 30.0], zoom: 3, layers: [streets] });
       window.mapInstance = map;
-      L.control.layers({ "🗺️ Street Map": streets, "🛰️ Satellite": satellite, "🌙 Dark": darkCanvas, "⛰️ Topo": topo }, null, { position: 'topright' }).addTo(map);
+      L.control.layers({ 'Street': streets, 'Satellite': satellite, 'Dark': darkCanvas, 'Topographic': topo }, null, { position: 'topright' }).addTo(map);
 
       MAP_LOCATIONS.forEach(loc => {
         const marker = L.circleMarker([loc.lat, loc.lon], {
           radius: Math.min(24, Math.max(8, Math.log2(loc.count) * 2.5)),
-          fillColor: "#3b82f6", color: "#ffffff", weight: 2, opacity: 1, fillOpacity: 0.85
+          fillColor: '#9A4D2E',
+          color: '#FFFFFF',
+          weight: 2,
+          opacity: 1,
+          fillOpacity: 0.85
         }).addTo(map);
         marker.bindPopup(`
-          <div style="font-family: system-ui, sans-serif; font-size: 13px; padding: 2px;">
-            <strong style="font-size: 15px; display: block; margin-bottom: 4px;">${escapeHtml(loc.city)}, ${escapeHtml(loc.country)}</strong>
-            <span style="color: #64748b; font-size: 12px; display: block; margin-bottom: 10px;">📸 ${loc.count.toLocaleString()} photos</span>
-            <button onclick="filterByCity('${escapeHtml(loc.city)}')" style="background: #3b82f6; color: white; border: none; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 600; width: 100%;">View Photos</button>
+          <div style="font-family: -apple-system, sans-serif; font-size: 13px; padding: 2px;">
+            <strong style="font-size: 14px; display: block; margin-bottom: 3px;">${escapeHtml(loc.city)}, ${escapeHtml(loc.country)}</strong>
+            <span style="color: #666057; font-size: 12px; display: block; margin-bottom: 9px;">${loc.count.toLocaleString()} photographs</span>
+            <button onclick="filterByCity('${escapeAttrJs(loc.city)}')" style="background: #9A4D2E; color: #FFFFFF; border: none; padding: 6px 12px; border-radius: 999px; cursor: pointer; font-size: 12px; font-weight: 600; width: 100%;">Explore Photos</button>
           </div>
         `);
       });
       setTimeout(() => map.invalidateSize(), 200);
-    }
-
-    function openLightbox(id) {
-      const p = ALL_PHOTOS.find(x => x.id === id);
-      if (!p) return;
-      const imgEl = document.getElementById('lightboxImg');
-      imgEl.dataset.step = '';
-      imgEl.src = p.p;
-      imgEl.onerror = () => handleImgError(imgEl, p.p, p.orig);
-      document.getElementById('lbTitle').innerText = p.c || p.id;
-      document.getElementById('lbMeta').innerText = `${p.d || 'Unknown Date'} • ${p.l || 'No Location'}`;
-      document.getElementById('lbDesc').innerText = p.c || "Natural language description will appear after the local vision pass.";
-      document.getElementById('lbCamera').innerText = p.cam || 'Unknown Camera';
-      document.getElementById('lbPath').innerText = p.orig;
-      document.getElementById('lightbox').classList.add('active');
-    }
-
-    function closeLightbox(e) {
-      if (!e || e.target.id === 'lightbox' || e.target.classList.contains('close-btn')) {
-        document.getElementById('lightbox').classList.remove('active');
-      }
-    }
-
-    function getAllClusters() {
-      const all = [];
-      if (typeof CORE_CLUSTERS !== 'undefined') all.push(...CORE_CLUSTERS);
-      if (typeof EXTENDED_CLUSTERS !== 'undefined') all.push(...EXTENDED_CLUSTERS);
-      return all;
-    }
-
-    function openPeopleManager() {
-      const clusters = getAllClusters().filter(c => c.count > 0);
-      const sSelect = document.getElementById('mergeSourceSelect');
-      const tSelect = document.getElementById('mergeTargetSelect');
-      const optionsHtml = clusters.map(c => `<option value="${c.id}">${escapeHtml(getClusterName(c))} (${c.count} faces)</option>`).join('');
-      sSelect.innerHTML = optionsHtml;
-      tSelect.innerHTML = optionsHtml;
-      if (clusters.length > 1) tSelect.selectedIndex = 1;
-
-      const tbody = document.getElementById('namingTableBody');
-      tbody.innerHTML = clusters.map(c => `
-        <tr>
-          <td><img src="avatars/cluster_${c.id}.jpg" style="width: 32px; height: 32px; border-radius: 50%; object-fit: cover;" onerror="this.style.display='none'"></td>
-          <td><strong>#${c.id}</strong></td>
-          <td>${c.count}</td>
-          <td><input type="text" data-cluster-id="${c.id}" value="${escapeHtml(customNamesMap[c.id] || '')}" placeholder="${escapeHtml(c.name)}"></td>
-        </tr>
-      `).join('');
-      document.getElementById('peopleManagerModal').classList.add('active');
-    }
-
-    function closePeopleManager(e) {
-      if (!e || e.target.id === 'peopleManagerModal' || e.target.classList.contains('close-btn')) {
-        document.getElementById('peopleManagerModal').classList.remove('active');
-      }
-    }
-
-    async function executeClusterMerge() {
-      const srcId = parseInt(document.getElementById('mergeSourceSelect').value, 10);
-      const tgtId = parseInt(document.getElementById('mergeTargetSelect').value, 10);
-      if (srcId === tgtId) { alert("Source and Target clusters must be different!"); return; }
-
-      pendingMerges.push({ source: srcId, target: tgtId });
-      ALL_PHOTOS.forEach(p => {
-        if (p.f && p.f.includes(srcId)) {
-          p.f = p.f.filter(x => x !== srcId);
-          if (!p.f.includes(tgtId)) p.f.push(tgtId);
-        }
-      });
-      const clusters = getAllClusters();
-      const sClust = clusters.find(c => c.id === srcId);
-      const tClust = clusters.find(c => c.id === tgtId);
-      if (sClust && tClust) { tClust.count += sClust.count; sClust.count = 0; }
-
-      try {
-        const res = await fetch('/api/people/merge', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ source_id: srcId, target_id: tgtId })
-        });
-        if (res.ok) {
-          renderPeople();
-          openPeopleManager();
-          alert(`Merged Cluster #${srcId} into #${tgtId} and persisted to SQLite!`);
-          return;
-        }
-      } catch (_) {}
-
-      renderPeople();
-      openPeopleManager();
-      alert(`Merged Cluster #${srcId} into #${tgtId} in session! Export commit_merges.py to persist offline.`);
-    }
-
-    async function saveCustomNames() {
-      const inputs = document.querySelectorAll('#namingTableBody input');
-      const updates = [];
-      inputs.forEach(inp => {
-        const cid = parseInt(inp.getAttribute('data-cluster-id'), 10);
-        const val = inp.value.trim();
-        if (val) {
-          customNamesMap[cid] = val;
-          updates.push({ cluster_id: cid, name: val });
-        } else {
-          delete customNamesMap[cid];
-        }
-      });
-
-      try {
-        if (updates.length > 0) {
-          const res = await fetch('/api/people/rename', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ updates })
-          });
-          if (res.ok) {
-            renderPeople();
-            alert("Saved custom names directly to SQLite & catalog_data.js!");
-            return;
-          }
-        }
-      } catch (_) {}
-
-      renderPeople();
-      alert("Names saved in viewer session! Click 'Export commit_merges.py' to save offline.");
-    }
-
-    async function quarantineHomeworkLive() {
-      try {
-        const res = await fetch('/api/homework/quarantine', { method: 'POST' });
-        if (res.ok) {
-          const data = await res.json();
-          alert(`Moved ${data.moved_count} flagged document files to content/documents/homework_archive/ and refreshed catalog!`);
-          location.reload();
-          return;
-        }
-      } catch (_) {}
-      exportCleanupScript();
-    }
-
-    function exportMergeCommitScript() {
-      const lines = [
-        "#!/usr/bin/env python3",
-        "import sqlite3",
-        "from pathlib import Path",
-        "DB_PATH = Path(__file__).resolve().parent / 'catalog.sqlite'",
-        "conn = sqlite3.connect(DB_PATH)",
-        "cursor = conn.cursor()"
-      ];
-      pendingMerges.forEach(m => {
-        lines.push(`cursor.execute("UPDATE people_faces SET cluster_id = ? WHERE cluster_id = ?", (${m.target}, ${m.source}))`);
-      });
-      Object.entries(customNamesMap).forEach(([cid, name]) => {
-        lines.push(`cursor.execute("UPDATE people_faces SET person_name = ? WHERE cluster_id = ?", (${JSON.stringify(name)}, ${cid}))`);
-      });
-      lines.push("conn.commit()", "conn.close()", "print('Done!')");
-      const blob = new Blob([lines.join('\n')], { type: 'text/x-python' });
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = "commit_merges.py";
-      a.click();
-    }
-
-    function exportCleanupScript() {
-      const hwItems = ALL_PHOTOS.filter(p => p.hw);
-      const lines = ["#!/bin/bash", "mkdir -p ../content/documents/homework_archive"];
-      hwItems.forEach(item => {
-        lines.push(`mv "${item.orig.replace('../', '')}" ../content/documents/homework_archive/ 2>/dev/null || true`);
-      });
-      const blob = new Blob([lines.join('\n')], { type: 'text/x-shellscript' });
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = "cleanup_homework.sh";
-      a.click();
     }
   </script>
 </body>

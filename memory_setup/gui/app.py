@@ -3,6 +3,7 @@ from __future__ import annotations
 import http.server
 import json
 import mimetypes
+import os
 import platform
 import socketserver
 import subprocess
@@ -12,7 +13,7 @@ import time
 import urllib.parse
 import webbrowser
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 from memory_setup.config import ArchiveContext, MIN_FREE_DISK_GB, OLLAMA_DEFAULT_MODEL
 from memory_setup.pipeline_runner import PipelineManager, get_archive_metrics
@@ -23,6 +24,7 @@ from memory_setup.setup.installer import (
     pull_ollama_model,
 )
 from memory_setup.viewer.builder import (
+    list_person_clusters,
     merge_person_clusters,
     quarantine_homework_files,
     rename_person_clusters,
@@ -30,6 +32,87 @@ from memory_setup.viewer.builder import (
 )
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
+
+_MIME_OVERRIDES = {
+    ".mp4": "video/mp4",
+    ".m4v": "video/mp4",
+    ".mov": "video/quicktime",
+    ".avi": "video/x-msvideo",
+    ".mkv": "video/x-matroska",
+    ".webm": "video/webm",
+    ".heic": "image/heic",
+    ".heif": "image/heif",
+    ".webp": "image/webp",
+    ".svg": "image/svg+xml",
+}
+
+
+def _guess_mime(file_path: Path) -> str:
+    ext = file_path.suffix.lower()
+    if ext in _MIME_OVERRIDES:
+        return _MIME_OVERRIDES[ext]
+    ctype, _ = mimetypes.guess_type(str(file_path))
+    return ctype or "application/octet-stream"
+
+
+def _parse_byte_range(range_header: str, file_size: int) -> Tuple[str, int, int]:
+    """Parse an HTTP Range header. Returns ('none'|'ok'|'invalid', start, end)."""
+    if not range_header or not range_header.lower().startswith("bytes="):
+        return "none", 0, 0
+    spec = range_header[6:].strip()
+    if not spec or "," in spec or "-" not in spec:
+        return "none", 0, 0
+    if file_size <= 0:
+        return "invalid", 0, 0
+    start_s, end_s = [p.strip() for p in spec.split("-", 1)]
+    if not start_s and not end_s:
+        return "invalid", 0, 0
+    try:
+        if not start_s:
+            suffix_len = int(end_s)
+            if suffix_len <= 0:
+                return "invalid", 0, 0
+            start = max(0, file_size - suffix_len)
+            end = file_size - 1
+        else:
+            start = int(start_s)
+            end = int(end_s) if end_s else file_size - 1
+    except ValueError:
+        return "invalid", 0, 0
+    end = min(end, file_size - 1)
+    if start < 0 or start >= file_size or end < start:
+        return "invalid", 0, 0
+    return "ok", start, end
+
+
+def _resolve_content_media(arch_root: Path, raw_path: str) -> Path:
+    """Resolve a relative viewer/archive media path and enforce strict containment inside `content/`."""
+    rel = str(raw_path or "").strip()
+    if not rel:
+        raise ValueError("Missing media path")
+    if rel.startswith("/archive/"):
+        rel = rel[len("/archive/") :]
+    arch_resolved = arch_root.resolve()
+    viewer_dir = arch_resolved / "viewer"
+    if rel.startswith("../"):
+        candidate = (viewer_dir / rel).resolve()
+    else:
+        candidate = (arch_resolved / rel.lstrip("/")).resolve()
+    content_root = (arch_resolved / "content").resolve()
+    if os.path.commonpath([str(content_root), str(candidate)]) != str(content_root) or candidate == content_root:
+        raise PermissionError("Path is outside archive content/ directory")
+    return candidate
+
+
+def _open_with_os_player(target: Path) -> None:
+    """Launch a media file in the host operating system's default player."""
+    sys_name = platform.system()
+    if sys_name == "Darwin":
+        subprocess.Popen(["open", str(target)])
+    elif sys_name == "Windows":
+        os.startfile(str(target))  # type: ignore[attr-defined]
+    else:
+        subprocess.Popen(["xdg-open", str(target)])
 
 
 def browse_native_folder() -> Optional[str]:
@@ -138,43 +221,116 @@ def create_app_server(
             self.end_headers()
             self.wfile.write(body)
 
-        def _serve_file(self, file_path: Path) -> None:
+        def _serve_file(self, file_path: Path, head_only: bool = False) -> None:
             if not file_path.exists() or not file_path.is_file():
                 self.send_error(404, "File not found")
                 return
-            ctype, _ = mimetypes.guess_type(str(file_path))
-            if not ctype:
-                ctype = "application/octet-stream"
+            ctype = _guess_mime(file_path)
             size = file_path.stat().st_size
-            self.send_response(200)
-            self.send_header("Content-Type", ctype)
-            self.send_header("Content-Length", str(size))
-            self.end_headers()
-            with open(file_path, "rb") as fp:
-                while True:
-                    chunk = fp.read(65536)
-                    if not chunk:
-                        break
-                    self.wfile.write(chunk)
+            range_status, start, end = _parse_byte_range(self.headers.get("Range", ""), size)
+
+            if range_status == "invalid":
+                self.send_response(416)
+                self.send_header("Content-Range", f"bytes */{size}")
+                self.send_header("Accept-Ranges", "bytes")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+
+            if range_status == "ok":
+                length = end - start + 1
+                self.send_response(206)
+                self.send_header("Content-Type", ctype)
+                self.send_header("Accept-Ranges", "bytes")
+                self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
+                self.send_header("Content-Length", str(length))
+                self.end_headers()
+            else:
+                start = 0
+                length = size
+                self.send_response(200)
+                self.send_header("Content-Type", ctype)
+                self.send_header("Accept-Ranges", "bytes")
+                self.send_header("Content-Length", str(size))
+                self.end_headers()
+
+            if head_only:
+                return
+
+            try:
+                remaining = length
+                with open(file_path, "rb") as fp:
+                    if start > 0:
+                        fp.seek(start)
+                    while remaining > 0:
+                        chunk = fp.read(min(65536, remaining))
+                        if not chunk:
+                            break
+                        self.wfile.write(chunk)
+                        remaining -= len(chunk)
+            except (BrokenPipeError, ConnectionResetError, OSError):
+                return
+
+        def _handle_static_or_archive(self, head_only: bool = False) -> bool:
+            parsed = urllib.parse.urlparse(self.path)
+            path = parsed.path
+
+            if path == "/" or path == "/index.html":
+                self._serve_file(STATIC_DIR / "index.html", head_only=head_only)
+                return True
+            if path in ("/app.js", "/style.css", "/icon.png", "/icon.ico"):
+                self._serve_file(STATIC_DIR / path.lstrip("/"), head_only=head_only)
+                return True
+
+            if path.startswith("/archive/") and state.selected_archive is not None:
+                rel = urllib.parse.unquote(path[len("/archive/") :]).lstrip("/")
+                target = (state.selected_archive / rel).resolve()
+                root_resolved = state.selected_archive.resolve()
+                if os.path.commonpath([str(root_resolved), str(target)]) == str(root_resolved):
+                    self._serve_file(target, head_only=head_only)
+                    return True
+                self.send_error(403, "Forbidden")
+                return True
+
+            return False
+
+        def do_HEAD(self) -> None:
+            if self._handle_static_or_archive(head_only=True):
+                return
+            self.send_error(404, "Not found")
 
         def _read_json_body(self) -> Dict[str, Any]:
             length = int(self.headers.get("Content-Length", "0"))
             raw = self.rfile.read(length) if length > 0 else b"{}"
             return json.loads(raw.decode("utf-8")) if raw else {}
 
+        def _resolve_archive_context(self, raw_path: Optional[str] = None) -> Optional[ArchiveContext]:
+            candidate = raw_path or (str(state.selected_archive) if state.selected_archive else None)
+            if not candidate:
+                return None
+            arch_path = Path(candidate).expanduser().resolve()
+            state.selected_archive = arch_path
+            return ArchiveContext(arch_path)
+
         def do_GET(self) -> None:
+            if self._handle_static_or_archive(head_only=False):
+                return
+
             parsed = urllib.parse.urlparse(self.path)
             path = parsed.path
 
-            if path == "/" or path == "/index.html":
-                self._serve_file(STATIC_DIR / "index.html")
-                return
-            if path in ("/app.js", "/style.css", "/icon.png", "/icon.ico"):
-                self._serve_file(STATIC_DIR / path.lstrip("/"))
-                return
-
             if path == "/api/status":
                 self._send_json(200, state.snapshot())
+                return
+
+            if path == "/api/people/clusters":
+                qs = urllib.parse.parse_qs(parsed.query)
+                raw_path = (qs.get("archive_path") or [None])[0]
+                ctx = self._resolve_archive_context(raw_path)
+                if ctx is None:
+                    self._send_json(400, {"error": "No archive selected."})
+                    return
+                self._send_json(200, {"ok": True, "clusters": list_person_clusters(ctx)})
                 return
 
             if path == "/api/pipeline/events":
@@ -199,18 +355,6 @@ def create_app_server(
                             time.sleep(0.8)
                 except (BrokenPipeError, ConnectionResetError, OSError):
                     return
-                return
-
-            # Serve files from the selected archive under /archive/
-            if path.startswith("/archive/") and state.selected_archive is not None:
-                rel = urllib.parse.unquote(path[len("/archive/") :]).lstrip("/")
-                target = (state.selected_archive / rel).resolve()
-                root_resolved = state.selected_archive.resolve()
-                # Allow symlinked content/ inside viewer/content/ as long as target stays inside archive_root
-                if str(target).startswith(str(root_resolved)):
-                    self._serve_file(target)
-                    return
-                self.send_error(403, "Forbidden")
                 return
 
             self.send_error(404, "Not found")
@@ -342,6 +486,8 @@ def create_app_server(
                     speed_mode=body.get("speed_mode", "whisper"),
                     enable_biometrics=bool(body.get("enable_biometrics", True)),
                     enable_vision=bool(body.get("enable_vision", True)),
+                    reprocess=bool(body.get("reprocess", False)),
+                    recluster=bool(body.get("recluster", False)),
                 )
                 stages = body.get("stages")
                 started = state.manager.start(ctx, stages=stages)
@@ -354,35 +500,88 @@ def create_app_server(
                 return
 
             if path == "/api/pipeline/sync":
-                raw_path = body.get("archive_path") or (str(state.selected_archive) if state.selected_archive else None)
-                if not raw_path:
+                ctx = self._resolve_archive_context(body.get("archive_path"))
+                if ctx is None:
                     self._send_json(400, {"error": "No archive selected."})
                     return
-                ctx = ArchiveContext(Path(raw_path).expanduser().resolve())
                 res = run_stage5_museum(ctx)
                 self._send_json(200, {"ok": True, "result": res, "archive": get_archive_metrics(ctx.archive_root)})
                 return
 
-            if path == "/api/people/rename" and state.selected_archive is not None:
-                ctx = ArchiveContext(state.selected_archive)
+            if path == "/api/people/rename":
+                ctx = self._resolve_archive_context(body.get("archive_path"))
+                if ctx is None:
+                    self._send_json(400, {"error": "No archive selected."})
+                    return
                 count = rename_person_clusters(ctx, body.get("updates", []))
-                self._send_json(200, {"ok": True, "updated": count})
+                self._send_json(
+                    200,
+                    {
+                        "ok": True,
+                        "updated": count,
+                        "clusters": list_person_clusters(ctx),
+                        "archive": get_archive_metrics(ctx.archive_root),
+                    },
+                )
                 return
 
-            if path == "/api/people/merge" and state.selected_archive is not None:
-                ctx = ArchiveContext(state.selected_archive)
-                merge_person_clusters(ctx, int(body["source_id"]), int(body["target_id"]))
-                self._send_json(200, {"ok": True})
+            if path == "/api/people/merge":
+                ctx = self._resolve_archive_context(body.get("archive_path"))
+                if ctx is None:
+                    self._send_json(400, {"error": "No archive selected."})
+                    return
+                try:
+                    source_id = int(body["source_id"])
+                    target_id = int(body["target_id"])
+                    merge_person_clusters(ctx, source_id, target_id)
+                except (KeyError, TypeError, ValueError) as exc:
+                    self._send_json(400, {"error": str(exc)})
+                    return
+                self._send_json(
+                    200,
+                    {
+                        "ok": True,
+                        "clusters": list_person_clusters(ctx),
+                        "archive": get_archive_metrics(ctx.archive_root),
+                    },
+                )
                 return
 
             if path == "/api/homework/quarantine":
-                raw_path = body.get("archive_path") or (str(state.selected_archive) if state.selected_archive else None)
-                if not raw_path:
+                ctx = self._resolve_archive_context(body.get("archive_path"))
+                if ctx is None:
                     self._send_json(400, {"error": "No archive selected."})
                     return
-                ctx = ArchiveContext(Path(raw_path).expanduser().resolve())
                 moved = quarantine_homework_files(ctx)
-                self._send_json(200, {"ok": True, "moved_count": moved})
+                self._send_json(
+                    200,
+                    {
+                        "ok": True,
+                        "moved_count": moved,
+                        "archive": get_archive_metrics(ctx.archive_root),
+                    },
+                )
+                return
+
+            if path == "/api/open-media":
+                raw_arch = body.get("archive_path") or (str(state.selected_archive) if state.selected_archive else None)
+                if not raw_arch:
+                    self._send_json(400, {"error": "No archive selected."})
+                    return
+                arch_root = Path(raw_arch).expanduser().resolve()
+                try:
+                    target = _resolve_content_media(arch_root, body.get("path", ""))
+                except PermissionError as exc:
+                    self._send_json(403, {"error": str(exc)})
+                    return
+                except ValueError as exc:
+                    self._send_json(400, {"error": str(exc)})
+                    return
+                if not target.is_file():
+                    self._send_json(404, {"error": "Media file not found"})
+                    return
+                _open_with_os_player(target)
+                self._send_json(200, {"ok": True, "opened": target.name})
                 return
 
             self._send_json(404, {"error": "Unknown API endpoint"})

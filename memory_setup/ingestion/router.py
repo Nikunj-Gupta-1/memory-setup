@@ -17,6 +17,9 @@ import numpy as np
 from PIL import ExifTags, Image, ImageFile
 
 from memory_setup.config import (
+    ARCHIVE_ROOT_IGNORE_EXTS,
+    ARCHIVE_ROOT_IGNORE_FILENAMES,
+    ARCHIVE_ROOT_IGNORE_PREFIXES,
     ArchiveContext,
     IGNORE_DIRNAMES,
     IGNORE_FILENAMES,
@@ -123,13 +126,21 @@ def scan_sources(ctx: ArchiveContext) -> List[Dict[str, Any]]:
         for root, dirs, files in os.walk(sdir):
             dirs[:] = sorted(d for d in dirs if d.lower() not in IGNORE_DIRNAMES)
             root_path = Path(root)
+            is_archive_root = root_path.resolve() == ctx.archive_root
             try:
                 rel_root = root_path.relative_to(ctx.archive_root).as_posix()
             except ValueError:
                 rel_root = root_path.relative_to(sdir).as_posix()
 
             for fname in sorted(files):
-                if fname.startswith(".") or fname.lower() in IGNORE_FILENAMES:
+                low = fname.lower()
+                if fname.startswith(".") or low in IGNORE_FILENAMES:
+                    continue
+                if is_archive_root and (
+                    low in ARCHIVE_ROOT_IGNORE_FILENAMES
+                    or any(low.startswith(prefix) for prefix in ARCHIVE_ROOT_IGNORE_PREFIXES)
+                    or Path(fname).suffix.lower() in ARCHIVE_ROOT_IGNORE_EXTS
+                ):
                     continue
                 full_path = root_path / fname
                 key = str(full_path.resolve())
@@ -261,20 +272,28 @@ def _next_id_counters(conn: sqlite3.Connection) -> Dict[str, int]:
     counters = {"P": 1, "V": 1, "S": 1, "X": 1, "GRP": 1}
     cur = conn.cursor()
     for prefix in ("P", "V", "S", "X"):
-        cur.execute("SELECT MAX(id) FROM media_items WHERE id LIKE ?", (f"{prefix}_%",))
-        val = cur.fetchone()[0]
-        if val and "_" in val:
+        max_num = 0
+        for (val,) in cur.execute("SELECT id FROM media_items WHERE id LIKE ?", (f"{prefix}_%",)).fetchall():
+            if val and "_" in val:
+                try:
+                    num = int(val.split("_")[1])
+                    if num > max_num:
+                        max_num = num
+                except ValueError:
+                    pass
+        counters[prefix] = max_num + 1
+    max_grp = 0
+    for (gval,) in cur.execute(
+        "SELECT companion_group_id FROM media_items WHERE companion_group_id LIKE 'GRP_%'"
+    ).fetchall():
+        if gval and "_" in gval:
             try:
-                counters[prefix] = int(val.split("_")[1]) + 1
+                num = int(gval.split("_")[1])
+                if num > max_grp:
+                    max_grp = num
             except ValueError:
                 pass
-    cur.execute("SELECT MAX(companion_group_id) FROM media_items WHERE companion_group_id LIKE 'GRP_%'")
-    gval = cur.fetchone()[0]
-    if gval and "_" in gval:
-        try:
-            counters["GRP"] = int(gval.split("_")[1]) + 1
-        except ValueError:
-            pass
+    counters["GRP"] = max_grp + 1
     return counters
 
 
@@ -355,6 +374,70 @@ def assign_permanent_ids_and_targets(ctx: ArchiveContext, items: List[Dict[str, 
         item["current_filename"] = target_fn
 
 
+def _backfill_candidate_original_hashes(
+    ctx: ArchiveContext,
+    conn: sqlite3.Connection,
+    candidate_sizes: set[int],
+) -> None:
+    """Populate missing `sha256_original` values for existing rows matching incoming sizes."""
+    conn.execute(
+        """
+        UPDATE media_items
+        SET sha256_original = (
+            SELECT p.sha256_processing
+            FROM processing_inputs p
+            WHERE p.media_id = media_items.id
+              AND p.is_reused_original = 1
+              AND p.sha256_processing IS NOT NULL
+              AND p.sha256_processing != ''
+        )
+        WHERE sha256_original IS NULL
+          AND EXISTS (
+            SELECT 1
+            FROM processing_inputs p
+            WHERE p.media_id = media_items.id
+              AND p.is_reused_original = 1
+              AND p.sha256_processing IS NOT NULL
+              AND p.sha256_processing != ''
+        )
+        """
+    )
+    if candidate_sizes:
+        missing_rows = conn.execute(
+            "SELECT id, current_path, file_size_bytes FROM media_items WHERE sha256_original IS NULL"
+        ).fetchall()
+        updates: List[Tuple[str, str]] = []
+        for mid, cur_path, fsize in missing_rows:
+            if fsize not in candidate_sizes:
+                continue
+            resolved = ctx.resolve(cur_path)
+            if resolved.is_file():
+                try:
+                    updates.append((sha256_file(resolved), mid))
+                except OSError:
+                    pass
+        if updates:
+            conn.executemany("UPDATE media_items SET sha256_original = ? WHERE id = ?", updates)
+    conn.commit()
+
+
+def _ensure_unique_target(dst: Path, item: Dict[str, Any], ctx: ArchiveContext) -> Path:
+    """Return a non-colliding target path inside `content/` and keep item fields in sync."""
+    if not dst.exists():
+        return dst
+    stem = dst.stem
+    suffix = dst.suffix
+    counter = 1
+    candidate = dst.with_name(f"{stem}_{counter}{suffix}")
+    while candidate.exists():
+        counter += 1
+        candidate = dst.with_name(f"{stem}_{counter}{suffix}")
+    item["current_full_path"] = str(candidate)
+    item["current_filename"] = candidate.name
+    item["current_rel_path"] = candidate.relative_to(ctx.archive_root).as_posix()
+    return candidate
+
+
 def run_stage1_consolidation(
     ctx: ArchiveContext,
     deduplicate: bool = True,
@@ -377,6 +460,10 @@ def run_stage1_consolidation(
 
     conn = get_connection(ctx.db_path)
     counters = _next_id_counters(conn)
+
+    if deduplicate:
+        candidate_sizes = {int(it["file_size_bytes"]) for it in items}
+        _backfill_candidate_original_hashes(ctx, conn, candidate_sizes)
 
     # Deduplicate against existing catalog SHA-256 or within the scan batch
     existing_hashes = set(
@@ -422,7 +509,7 @@ def run_stage1_consolidation(
 
     for idx, item in enumerate(items, 1):
         src = Path(item["original_full_path"])
-        dst = Path(item["current_full_path"])
+        dst = _ensure_unique_target(Path(item["current_full_path"]), item, ctx)
         if not src.exists():
             failure_count += 1
             errors.append(f"Source missing: {src}")
@@ -593,32 +680,51 @@ def run_stage2_standardization(
     ctx: ArchiveContext,
     max_workers: int = 8,
     progress_cb: ProgressCallback = None,
+    reprocess: Optional[bool] = None,
 ) -> Dict[str, Any]:
     """Execute Stage 2: Batch EXIF/GPS extraction, offline geocoding, and proxy generation."""
     free_gb = check_disk_space(ctx.archive_root)
     if free_gb < ctx.min_free_disk_gb:
         raise RuntimeError(f"Free disk space ({free_gb:.2f} GiB) below threshold ({ctx.min_free_disk_gb} GiB).")
 
+    do_reprocess = ctx.reprocess if reprocess is None else reprocess
     conn = get_connection(ctx.db_path)
     cursor = conn.cursor()
-    photos = [
-        dict(r)
-        for r in cursor.execute(
-            "SELECT id, current_path, original_ext, file_size_bytes FROM media_items WHERE media_type = 'photo'"
-        ).fetchall()
-    ]
+    total_photos = int(
+        cursor.execute("SELECT COUNT(*) FROM media_items WHERE media_type = 'photo'").fetchone()[0] or 0
+    )
 
-    if not photos:
+    if total_photos == 0:
         conn.close()
         return {"total_photos": 0, "metadata_extracted": 0, "photos_with_gps": 0, "processing_inputs_ready": 0}
+
+    if do_reprocess:
+        photos_for_exif = [
+            dict(r)
+            for r in cursor.execute(
+                "SELECT id, current_path, original_ext, file_size_bytes FROM media_items WHERE media_type = 'photo'"
+            ).fetchall()
+        ]
+    else:
+        photos_for_exif = [
+            dict(r)
+            for r in cursor.execute(
+                """
+                SELECT m.id, m.current_path, m.original_ext, m.file_size_bytes
+                FROM media_items m
+                LEFT JOIN metadata_exif e ON m.id = e.media_id
+                WHERE m.media_type = 'photo' AND e.media_id IS NULL
+                """
+            ).fetchall()
+        ]
 
     has_exiftool = shutil.which("exiftool") is not None
     chunk_size = 2000
     meta_count = 0
     gps_count = 0
 
-    for start_idx in range(0, len(photos), chunk_size):
-        chunk = photos[start_idx : start_idx + chunk_size]
+    for start_idx in range(0, len(photos_for_exif), chunk_size):
+        chunk = photos_for_exif[start_idx : start_idx + chunk_size]
         path_to_id = {str(ctx.resolve(p["current_path"])): p["id"] for p in chunk}
         exif_by_path: Dict[str, Dict[str, Any]] = {}
 
@@ -714,23 +820,45 @@ def run_stage2_standardization(
         _emit(
             progress_cb,
             "stage2",
-            min(start_idx + chunk_size, len(photos)),
-            len(photos),
-            f"Extracted EXIF metadata for {meta_count:,}/{len(photos):,} photos",
+            min(start_idx + chunk_size, len(photos_for_exif)),
+            len(photos_for_exif),
+            f"Extracted EXIF metadata for {meta_count:,}/{len(photos_for_exif):,} photos",
         )
 
     # Processing inputs: reuse JPEG/PNG, generate verified proxies in viewer/.processing_cache/
     ctx.processing_cache_dir.mkdir(parents=True, exist_ok=True)
-    compatible: List[Dict[str, Any]] = []
-    conversion_tasks: List[Tuple[str, str, str, str]] = []
+    input_rows = cursor.execute(
+        """
+        SELECT m.id, m.current_path, m.original_ext, m.file_size_bytes,
+               p.media_id AS has_input, p.processing_path
+        FROM media_items m
+        LEFT JOIN processing_inputs p ON m.id = p.media_id
+        WHERE m.media_type = 'photo'
+        """
+    ).fetchall()
 
-    for p in photos:
+    compatible: List[Dict[str, Any]] = []
+    reused_cached_proxies: List[Tuple[str, str]] = []
+    conversion_tasks: List[Tuple[str, str, str, str]] = []
+    touched_ids: List[str] = []
+
+    for r in input_rows:
+        p = dict(r)
+        has_input = p["has_input"] is not None
+        if not do_reprocess and has_input and p["processing_path"] and ctx.resolve(p["processing_path"]).exists():
+            continue
+
         ext = p["original_ext"].lower()
+        touched_ids.append(p["id"])
         if ext in (".jpg", ".jpeg", ".png"):
             compatible.append(p)
         else:
             dst_rel = f"viewer/.processing_cache/{p['id']}.jpg"
-            conversion_tasks.append((p["id"], str(ctx.archive_root), p["current_path"], dst_rel))
+            dst_full = ctx.resolve(dst_rel)
+            if not do_reprocess and _verify_non_black_image(dst_full):
+                reused_cached_proxies.append((p["id"], dst_rel))
+            else:
+                conversion_tasks.append((p["id"], str(ctx.archive_root), p["current_path"], dst_rel))
 
     for p in compatible:
         fmt = "PNG" if p["original_ext"].lower() == ".png" else "JPEG"
@@ -744,9 +872,20 @@ def run_stage2_standardization(
             """,
             (p["id"], p["current_path"], fmt),
         )
+    for mid, dst_rel in reused_cached_proxies:
+        cursor.execute(
+            """
+            INSERT OR REPLACE INTO processing_inputs (
+                media_id, processing_path, is_reused_original, format,
+                pixel_width, pixel_height, aspect_ratio, megapixels,
+                color_mode, sha256_processing, validation_status, validation_error
+            ) VALUES (?, ?, 0, 'JPEG', 0, 0, 0.0, 0.0, 'UNKNOWN', '', 'REGISTERED', NULL)
+            """,
+            (mid, dst_rel),
+        )
     conn.commit()
 
-    success_conv = 0
+    success_conv = len(reused_cached_proxies)
     failed_conv = 0
     errors: List[str] = []
 
@@ -785,20 +924,39 @@ def run_stage2_standardization(
                         f"Generated {idx:,}/{len(conversion_tasks):,} proxies",
                     )
 
-    cursor.execute("UPDATE media_items SET processing_status = 'stage2_standardized' WHERE media_type = 'photo'")
+    if do_reprocess:
+        cursor.execute("UPDATE media_items SET processing_status = 'stage2_standardized' WHERE media_type = 'photo'")
+    else:
+        cursor.execute(
+            "UPDATE media_items SET processing_status = 'stage2_standardized' WHERE media_type = 'photo' AND processing_status = 'stage1_consolidated'"
+        )
+        if touched_ids:
+            cursor.executemany(
+                "UPDATE media_items SET processing_status = 'stage2_standardized' WHERE id = ?",
+                [(mid,) for mid in touched_ids],
+            )
+
+    total_inputs_ready = int(cursor.execute("SELECT COUNT(*) FROM processing_inputs").fetchone()[0] or 0)
+    total_gps = int(
+        cursor.execute(
+            "SELECT COUNT(*) FROM metadata_exif WHERE gps_latitude IS NOT NULL AND gps_longitude IS NOT NULL"
+        ).fetchone()[0]
+        or 0
+    )
     summary = {
         "stage": "stage2_metadata_and_standardization",
         "completed_at": datetime.now(timezone.utc).isoformat(),
-        "total_photos": len(photos),
+        "total_photos": total_photos,
         "metadata_extracted": meta_count,
-        "photos_with_gps": gps_count,
-        "processing_inputs_ready": len(compatible) + success_conv,
+        "photos_with_gps": total_gps,
+        "processing_inputs_ready": total_inputs_ready,
+        "newly_processed_inputs": len(compatible) + success_conv,
         "failed_conversions": failed_conv,
         "errors": errors[:30],
     }
     report_path = ctx.reports_dir / "stage2_report.json"
     report_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
-    record_checkpoint(conn, "stage2_standardization", len(photos), summary["processing_inputs_ready"], failed_conv, str(report_path), summary)
+    record_checkpoint(conn, "stage2_standardization", total_photos, total_inputs_ready, failed_conv, str(report_path), summary)
     conn.commit()
     conn.close()
     return summary
@@ -861,15 +1019,19 @@ def run_stage3_validation(
     ctx: ArchiveContext,
     max_workers: int = 8,
     progress_cb: ProgressCallback = None,
+    reprocess: Optional[bool] = None,
 ) -> Dict[str, Any]:
     """Execute Stage 3: Byte/raster validation, dHash computation, and canonical AI manifest export."""
+    do_reprocess = ctx.reprocess if reprocess is None else reprocess
     conn = get_connection(ctx.db_path)
     cursor = conn.cursor()
 
     rows = cursor.execute(
         """
-        SELECT p.media_id, p.processing_path, m.current_path, m.original_rel_path,
-               m.capture_timestamp, m.has_unknown_date,
+        SELECT p.media_id, p.processing_path, p.format, p.pixel_width, p.pixel_height,
+               p.aspect_ratio, p.megapixels, p.color_mode, p.sha256_processing,
+               p.dhash, p.validation_status,
+               m.current_path, m.original_rel_path, m.capture_timestamp, m.has_unknown_date,
                e.make, e.model, e.gps_latitude, e.gps_longitude, e.city, e.country
         FROM processing_inputs p
         JOIN media_items m ON p.media_id = m.id
@@ -878,11 +1040,36 @@ def run_stage3_validation(
     ).fetchall()
     all_items = [dict(r) for r in rows]
 
-    tasks = [(item["media_id"], str(ctx.resolve(item["processing_path"]))) for item in all_items]
+    tasks: List[Tuple[str, str]] = []
     validated: Dict[str, Dict[str, Any]] = {}
+    newly_validated: List[Dict[str, Any]] = []
     valid_count = 0
     corrupt_count = 0
     errors: List[Tuple[str, str]] = []
+
+    for item in all_items:
+        mid = item["media_id"]
+        if (
+            not do_reprocess
+            and item["validation_status"] == "VALID"
+            and bool(item.get("dhash"))
+            and bool(item.get("sha256_processing"))
+        ):
+            validated[mid] = {
+                "media_id": mid,
+                "status": "VALID",
+                "width": item["pixel_width"],
+                "height": item["pixel_height"],
+                "aspect_ratio": item["aspect_ratio"],
+                "megapixels": item["megapixels"],
+                "color_mode": item["color_mode"],
+                "format": item["format"],
+                "sha256": item["sha256_processing"],
+                "dhash": item["dhash"],
+            }
+            valid_count += 1
+        else:
+            tasks.append((mid, str(ctx.resolve(item["processing_path"]))))
 
     if tasks:
         with ProcessPoolExecutor(max_workers=max_workers) as executor:
@@ -891,6 +1078,7 @@ def run_stage3_validation(
                 res = fut.result()
                 mid = res["media_id"]
                 validated[mid] = res
+                newly_validated.append(res)
                 if res["status"] == "VALID":
                     valid_count += 1
                 else:
@@ -900,7 +1088,8 @@ def run_stage3_validation(
                     _emit(progress_cb, "stage3", idx, len(tasks), f"Validated {idx:,}/{len(tasks):,} images")
 
     update_rows = []
-    for mid, res in validated.items():
+    for res in newly_validated:
+        mid = res["media_id"]
         if res["status"] == "VALID":
             update_rows.append(
                 (
@@ -919,17 +1108,18 @@ def run_stage3_validation(
         else:
             update_rows.append((0, 0, 0.0, 0.0, "UNKNOWN", "", "", res["status"], res["error"], mid))
 
-    cursor.executemany(
-        """
-        UPDATE processing_inputs
-        SET pixel_width = ?, pixel_height = ?, aspect_ratio = ?, megapixels = ?,
-            color_mode = ?, sha256_processing = ?, dhash = ?,
-            validation_status = ?, validation_error = ?
-        WHERE media_id = ?
-        """,
-        update_rows,
-    )
-    conn.commit()
+    if update_rows:
+        cursor.executemany(
+            """
+            UPDATE processing_inputs
+            SET pixel_width = ?, pixel_height = ?, aspect_ratio = ?, megapixels = ?,
+                color_mode = ?, sha256_processing = ?, dhash = ?,
+                validation_status = ?, validation_error = ?
+            WHERE media_id = ?
+            """,
+            update_rows,
+        )
+        conn.commit()
 
     # Match UNKNOWN_DATE items against dated archive using dHash
     unknown_items = [
@@ -1039,7 +1229,22 @@ def run_stage3_validation(
         "INSERT INTO ai_manifest VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         manifest_rows,
     )
-    cursor.execute("UPDATE media_items SET processing_status = 'stage3_validated' WHERE media_type = 'photo'")
+    if do_reprocess:
+        cursor.execute("UPDATE media_items SET processing_status = 'stage3_validated' WHERE media_type = 'photo'")
+    else:
+        cursor.execute(
+            """
+            UPDATE media_items
+            SET processing_status = 'stage3_validated'
+            WHERE media_type = 'photo'
+              AND processing_status IN ('stage1_consolidated', 'stage2_standardized')
+            """
+        )
+        if newly_validated:
+            cursor.executemany(
+                "UPDATE media_items SET processing_status = 'stage3_validated' WHERE id = ?",
+                [(res["media_id"],) for res in newly_validated],
+            )
     conn.commit()
 
     keys = [

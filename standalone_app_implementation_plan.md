@@ -1,8 +1,8 @@
 # Universal Autonomous Application: Comprehensive Architecture & Implementation Plan
 
 **Target Repository**: `Memory_Setup/`  
-**Current Milestone**: Architecture Definition, Technical Specifications & Planning  
-**Execution Mode**: Planning & Alignment Only (No code implementation until plan approval)  
+**Current Milestone**: Implemented Architecture & Reference Design  
+**Status**: Completed & Verified (`36/36` pytest checks passing)  
 
 ---
 
@@ -111,9 +111,9 @@ flowchart TD
 ### 3. Browser Security Policy Resolution (`file://` vs. Local Streaming Server)
 * **The Problem**: When a user double-clicks `viewer/viewer.html` directly from disk (`file:///`), Chromium-based browsers (Chrome, Edge, Brave) enforce strict **directory traversal sandboxing**. Sibling directory references like `../content/images/...` are blocked with: `Not allowed to load local resource`.
 * **The Architectural Resolution**:
-  * **In-App GUI Execution**: The desktop application operates via `pywebview` backed by an embedded FastAPI ASGI server over `http://localhost:<port>`. The server mounts the root directory, making `content/` and `viewer/` accessible with zero browser security blocks.
+  * **In-App GUI Execution**: The desktop application operates via `pywebview` backed by an embedded stdlib `ThreadingHTTPServer` (`http://127.0.0.1:<port>`) supporting HTTP `206` Byte-Range video streaming. The server exposes `/archive/` safely inside the selected archive root, making `content/` and `viewer/` accessible with zero browser security blocks.
   * **Zero-Config Standalone Launcher Suite**: To allow users to open the museum outside the application at any time without terminal knowledge, Stage 5 generates:
-    * `viewer/server.py`: A lightweight, zero-dependency Python HTTP server with automatic port-hunting (8080–8095) that opens the default browser automatically.
+    * `viewer/server.py`: A zero-dependency Python stdlib HTTP server with automatic port-hunting (8080–8094), HTTP `206` Byte-Range streaming, and `POST /api/open-media` OS fallback that opens the default browser automatically.
     * `viewer/start_viewer.command` (macOS double-clickable) and `viewer/start_viewer.bat` (Windows double-clickable).
     * A top-level launcher shortcut at the archive root (`start_viewer.command` / `.bat`) so users can double-click right from the main folder.
   * **JavaScript Multi-Stage Fallback (`handleImgError`)**: Inside `viewer.html`, an image loading error handler dynamically resolves `.processing_cache/` proxy JPEGs, toggles `../` prefixes, and falls back to original master files automatically.
@@ -121,7 +121,7 @@ flowchart TD
 ---
 
 ### 4. Strict Separation of Application Code vs. Data Payloads (Anti-Clobber Contract)
-* **The Problem**: In our initial Stage 5 script, a monolithic `generate_viewer_html()` function regenerated `viewer.html` from scratch on every run. When rerun, it clobbered custom additions, lost the `#peopleManagerModal`, and reverted to a hardcoded 120-image sample.
+* **The Problem**: In our initial Stage 5 script, a monolithic `generate_viewer_html()` function regenerated `viewer.html` from scratch on every run. When rerun, it clobbered custom additions and reverted to a hardcoded 120-image sample.
 * **The Architectural Resolution**:
   * **Immutable Application Template**: `viewer.html` is an immutable, static application bundle packaged in `memory_setup/viewer/template/viewer.html`. It is written once during archive initialization.
   * **Dynamic Data Payloads**: Stage 5 strictly regenerates **data artifacts**:
@@ -171,23 +171,25 @@ flowchart TD
 ### Component 1: Application Shell & Desktop GUI (`memory_setup.gui`)
 
 #### [NEW] `memory_setup/gui/app.py`
-- FastAPI ASGI backend with loopback CORS.
-- Native OS window via `pywebview` (WKWebView on macOS, WebView2 on Windows).
-- Exposes native folder picker: `pywebview.api.select_folder()`.
+- Python stdlib `_DaemonThreadingHTTPServer` (`http.server`) backend on loopback (`127.0.0.1`) with HTTP `206` Byte-Range video/image streaming under `/archive/`.
+- Native OS window via `pywebview` (WKWebView on macOS, WebView2 on Windows) with automatic browser fallback.
+- Exposes native OS folder picker (`osascript` on macOS, `pywebview`/`tkinter` fallback) and `POST /api/open-media` OS media player launcher guarded strictly inside `content/`.
 - Endpoints:
-  - `GET /api/status`: System setup health, process RSS memory, and pipeline status.
-  - `POST /api/pipeline/start`: Parameters (`folder_path`, `storage_mode`, `speed_mode`, `enable_vision`).
-  - `POST /api/pipeline/sync`: Triggers fast on-the-fly museum data sync (<0.3s).
-  - `POST /api/pipeline/pause`: Stops worker and triggers `keep_alive: 0` to immediately free VRAM.
+  - `GET /api/status`: System setup health, Ollama RSS memory, archive metrics, and pipeline status.
   - `GET /api/pipeline/events`: SSE stream delivering real-time progress and logs.
+  - `POST /api/browse-folder`, `POST /api/preflight`: Native folder picker & disk/tool pre-flight audit.
+  - `POST /api/setup/start-ollama`, `POST /api/setup/pull-model`, `POST /api/setup/install-biometrics`: Interactive dependency setup.
+  - `POST /api/pipeline/start`, `POST /api/pipeline/stop`, `POST /api/pipeline/sync`: Incremental/full execution (`reprocess=False`, `recluster=False` by default), cooperative pause (`keep_alive: 0`), and fast museum sync.
+  - `GET /api/people/clusters`, `POST /api/people/rename`, `POST /api/people/merge`, `POST /api/homework/quarantine`, `POST /api/open-media`: Live archive curation (Control Center only) and OS playback.
 
-#### [NEW] `memory_setup/gui/static/index.html` & `app.js`
-- Modern responsive dashboard using Tailwind CSS and Alpine.js.
-- Drag-and-drop folder selector.
+#### [NEW] `memory_setup/gui/static/index.html`, `style.css` & `app.js`
+- Lightweight responsive dashboard written in pure vanilla HTML, CSS, and JavaScript (no CDN or JS framework dependencies).
+- Archive & Safe Copy Source folder selectors with Audit button.
 - Segmented storage control: `[ In-Place Move ]` | `[ Safe Copy ]`.
-- Segmented speed control: `[ Whisper (Low RAM / Cool) ]` | `[ Turbo (Continuous) ]`.
-- Live 5-stage progress cards with throughput counters, memory monitor, and current image thumbnails.
-- 1-click **"Open Offline Museum"** button upon completion.
+- Segmented speed control: `[ Whisper (Low RAM / Cool) ]` | `[ Turbo (200-item recycle) ]`.
+- Incremental & rebuild toggles (`Force Reprocess Existing Media`, `Force Full Face Re-Cluster`) plus `#peopleManagerModal` (`Manage & Merge People`) and `Quarantine Docs`.
+- Live telemetry cards (including Total Items, Master Photos, Videos, Geocoded, Faces Indexed, AI Captioned, Docs Flagged) and progress controls.
+- 1-click **"Open Offline Museum Viewer"** button.
 
 ---
 
@@ -203,7 +205,8 @@ flowchart TD
 #### [NEW] `memory_setup/ingestion/router.py`
 - Enforces strict two-folder contract:
   - `content/images/YYYY/`, `content/videos/YYYY/`, `content/documents/`.
-  - `viewer/.processing_cache/` proxy generation using cross-platform `pillow-heif` (zero `sips` dependency).
+  - `viewer/.processing_cache/` proxy generation using hardware `sips` (macOS) with cross-platform `pillow-heif` / ImageMagick fallbacks.
+  - Incremental re-run idempotency (`face_scanned`, size-matched lazy `sha256_original` backfill, runtime-file ignores, and existing EXIF/proxy/validation skip unless `--reprocess`).
   - Creates relative symlink `viewer/content -> ../content`.
 
 ---
@@ -211,16 +214,13 @@ flowchart TD
 ### Component 3: Hardware-Adaptive Biometrics (`memory_setup.biometrics`)
 
 #### [NEW] `memory_setup/biometrics/detector.py`
-- SCRFD-10GF face detector with 5-point facial landmark alignment.
+- InsightFace `buffalo_l` (SCRFD-10GF face detector + ArcFace ResNet-50 512-d L2-normalized embeddings) with incremental `media_items.face_scanned` tracking and `-2` unclustered staging.
 - Smart Hybrid reading: reads proxy JPEGs for HEIC and master files for JPG/PNG.
 
-#### [NEW] `memory_setup/biometrics/embedder.py`
-- ArcFace ResNet-50 producing 512-dimensional $L_2$-normalized metric unit vectors.
-
 #### [NEW] `memory_setup/biometrics/cluster.py`
-- Vectorized Leader Centroid Clustering with verified cosine similarity threshold $T = 0.48$.
+- Vectorized Leader Centroid Clustering with verified cosine similarity threshold $T = 0.48$, preserving existing `cluster_id >= 0` & `person_name` edits by matching new `-2` faces against existing centroids first unless `recluster=True`.
 - Bridges childhood vs. adulthood drift without false cross-family merges.
-- Crops canonical eye-aligned avatar thumbnails into `viewer/avatars/cluster_X.jpg`.
+- Crops missing `160x160` avatar thumbnails into `viewer/avatars/cluster_X.jpg`.
 
 ---
 
@@ -264,12 +264,12 @@ flowchart TD
   - Archive root launcher shortcut: `start_viewer.command` / `.bat`.
 
 #### [NEW] `memory_setup/viewer/template/viewer.html`
-- Complete single-page museum application:
-  - 32k+ photo timeline gallery with 60fps virtual scrolling.
+- Complete single-page museum application featuring Warm Archival Daylight & Darkroom themes:
+  - 32k+ photo timeline gallery with progressive rendering, year/sort filters, and keyboard-navigable lightbox (`←` / `→` / `Esc`).
+  - Video Cinema library (`ALL_VIDEOS`) with HTTP `206` byte-range streaming, MOV/MP4/AVI format chips, Live Photo toggle, and `.avi` System Player (`POST /api/open-media`) + download fallback.
   - Esri ArcGIS World Map (35+ cities, 4 layer styles, city photo filtering).
-  - People & Faces tab with all 30 top clusters (9 core family + 21 recurring).
-  - Interactive `⚙️ Manage & Merge People` modal with 1-click cluster merger, custom naming, and migration script exporter (`commit_merges.py`).
-  - Homework Cleanup tab with `Export cleanup_homework.sh`.
+  - People & Faces tab displaying Core Family & Extended Recurring face clusters for click-to-filter exploration (all editing/merging handled exclusively in the Memory Setup Control Center).
+  - Documents & Homework review tab with lazy-loaded pagination (search/year/sort + 60-card scroll batches) for read-only inspection of flagged documents (quarantine handled exclusively in the Memory Setup Control Center).
   - Multi-stage image error fallback (`handleImgError`) ensuring images load under any server or file configuration.
 
 ---
@@ -280,27 +280,30 @@ flowchart TD
 Memory_Setup/
 ├── pyproject.toml
 ├── README.md
-├── ARCHITECTURE.md
+├── AGENT.md
+├── PROJECT_MANIFESTO.md
 ├── memory_setup/
 │   ├── __init__.py
 │   ├── cli.py                    # Standalone CLI entrypoint
-│   ├── config.py                 # Pydantic global settings
+│   ├── config.py                 # ArchiveContext dataclasses & ignore rules
+│   ├── db.py                     # SQLite schema & incremental migrations
+│   ├── pipeline_runner.py        # Multi-stage orchestrator & archive metrics
 │   ├── setup/                    # Component 0: Setup & Dependency Guide
 │   │   ├── __init__.py
 │   │   ├── checker.py            # Health diagnostics (Ollama, models, GPU)
 │   │   └── installer.py          # Auto-puller for models, Ollama guidance
 │   ├── gui/                      # Component 1: Desktop GUI & Webview Shell
 │   │   ├── __init__.py
-│   │   ├── app.py                # FastAPI ASGI server + pywebview launcher
+│   │   ├── app.py                # Stdlib ThreadingHTTPServer + pywebview launcher
 │   │   └── static/
-│   │       ├── index.html        # Modern Tailwind dashboard
-│   │       ├── app.js            # Reactive Alpine.js frontend logic
+│   │       ├── index.html        # Vanilla HTML dashboard
+│   │       ├── app.js            # Vanilla JS frontend & SSE listener
 │   │       └── style.css
 │   ├── ingestion/                # Component 2: Format Sniffer & Router
 │   │   ├── __init__.py
 │   │   ├── sniffer.py            # Magic-bytes MIME identification
 │   │   ├── companions.py         # Live Photos & sidecar matching
-│   │   └── router.py             # In-Place / Safe-Copy normalizer
+│   │   └── router.py             # Incremental In-Place / Safe-Copy normalizer
 │   ├── geocoding/                # Component 3: Offline Spatial Geocoder
 │   │   ├── __init__.py
 │   │   ├── offline_tree.py       # Spatial KD-Tree over 15k cities
@@ -308,9 +311,8 @@ Memory_Setup/
 │   │       └── cities15000.sqlite
 │   ├── biometrics/               # Component 4: Biometric Face Engine
 │   │   ├── __init__.py
-│   │   ├── detector.py           # SCRFD-10GF (5-point alignment)
-│   │   ├── embedder.py           # ArcFace ResNet-50 512-d
-│   │   └── cluster.py            # Vectorized Leader Centroid (thresh=0.48)
+│   │   ├── detector.py           # SCRFD-10GF & ArcFace ResNet-50 512-d
+│   │   └── cluster.py            # Incremental Vectorized Leader Centroid (thresh=0.48)
 │   ├── vision/                   # Component 5: Document Filter & Ollama VLM
 │   │   ├── __init__.py
 │   │   ├── classifier.py         # High-precision multi-layer document classifier
@@ -319,19 +321,24 @@ Memory_Setup/
 │       ├── __init__.py
 │       ├── builder.py            # FTS5 indexer, data payload exporter
 │       └── template/
-│           ├── viewer.html       # Immutable Museum HTML with Map & Person Merger
-│           ├── server.py         # Lightweight local streaming server
+│           ├── viewer.html       # Immutable Read-Only Museum HTML with Map, Videos & People Filter
+│           ├── server.py         # Zero-dependency HTTP 206 streaming & /api/open-media server
 │           ├── start_viewer.command # macOS 1-click launcher
 │           └── start_viewer.bat  # Windows 1-click launcher
-└── tests/                        # Lightweight unit tests (RAM-safe)
+└── tests/                        # 36 unit & integration tests (RAM-safe)
     ├── test_checker.py
     ├── test_sniffer.py
     ├── test_companions.py
+    ├── test_router_and_db.py
+    ├── test_incremental_pipeline.py
     ├── test_geocoder.py
     ├── test_clustering.py
     ├── test_document_classifier.py
     ├── test_memory_bounded_client.py
-    └── test_museum_builder.py
+    ├── test_museum_builder.py
+    ├── test_video_viewer_and_server.py
+    ├── test_gui_api.py
+    └── test_live_archive_compatibility.py
 ```
 
 ---
@@ -340,12 +347,12 @@ Memory_Setup/
 
 | Phase | Target Module | Key Deliverables | Verification Milestone |
 | :--- | :--- | :--- | :--- |
-| **Phase 1** | Project Scaffolding & Setup Guide | `pyproject.toml`, directory tree, Pydantic settings, health checker, Ollama model puller. | Installs cleanly via `uv pip install -e .`; diagnostics report system health. |
-| **Phase 2** | Universal Ingestion & Normalizer | Magic-bytes sniffer, companion Live Photo matcher, sidecar linker, two-folder router (In-Place & Safe Copy) with `pillow-heif`. | Ingests a synthetic test corpus of mixed, corrupted, and nested files into `content/` and `viewer/`. |
+| **Phase 1** | Project Scaffolding & Setup Guide | `pyproject.toml`, directory tree, `ArchiveContext` dataclasses, health checker, Ollama model puller. | Installs cleanly via `uv pip install -e .`; diagnostics report system health. |
+| **Phase 2** | Universal Ingestion & Normalizer | Magic-bytes sniffer, companion Live Photo matcher, sidecar linker, incremental two-folder router (In-Place & Safe Copy) with `sips` / `pillow-heif`. | Ingests a synthetic test corpus of mixed, corrupted, and nested files into `content/` and `viewer/`. |
 | **Phase 3** | Metadata & Offline Geocoding | Fast EXIF/QuickTime parser, embedded KD-tree spatial geocoder (15k cities). | Resolves 1,000 GPS coordinates in $<0.1\text{s}$ with zero network requests. |
-| **Phase 4** | Biometrics & Vision AI Engine | InsightFace SCRFD + ArcFace 512-d pipeline, Leader Centroid clustering (thresh=0.48), high-precision document classifier, memory-bounded single-worker Ollama client. | Accurately clusters family members across age gaps; 0 family photos misclassified as homework; RAM strictly bounded $<2.5$ GB. |
-| **Phase 5** | Museum Generator & Launcher Suite | Anti-clobber builder, FTS5 indexer, `catalog_data.js` exporter, `server.py`, `start_viewer.command` / `.bat`. | Museum opens in browser via launcher; map, search, and people tabs fully interactive. |
-| **Phase 6** | Desktop GUI & Packaging | Native desktop GUI window (`pywebview`), folder picker, live progress dashboard, speed mode selector, PyInstaller binary. | Standalone executable launches on macOS and Windows, processes folder end-to-end. |
+| **Phase 4** | Biometrics & Vision AI Engine | InsightFace SCRFD + ArcFace 512-d pipeline, incremental Leader Centroid clustering (thresh=0.48), high-precision document classifier, memory-bounded single-worker Ollama client. | Accurately clusters family members across age gaps; preserves manual merges/names; 0 family photos misclassified as homework; RAM strictly bounded $<2.5$ GB. |
+| **Phase 5** | Museum Generator & Launcher Suite | Anti-clobber builder, FTS5 indexer, `catalog_data.js` (`ALL_PHOTOS` + `ALL_VIDEOS`), HTTP `206` Range `server.py`, `start_viewer.command` / `.bat`. | Museum opens in browser via launcher; photos, videos, map, search, and people tabs fully interactive. |
+| **Phase 6** | Desktop GUI & Launchers | Native desktop GUI window (`pywebview`), folder picker, live progress dashboard, speed mode selector, native macOS `Memory Setup.app` + Windows `.bat`/`.lnk` launchers. | Native desktop Control Center launches on macOS and Windows, processes folder end-to-end. |
 
 ---
 

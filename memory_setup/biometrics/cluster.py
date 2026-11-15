@@ -98,43 +98,21 @@ def cluster_embeddings(
     return ranked_labels, stats
 
 
-def cluster_and_generate_avatars(
+def _generate_cluster_avatars(
     ctx: ArchiveContext,
-    thresh: Optional[float] = None,
-    min_cluster_size: int = 3,
-    top_avatars: int = 30,
-) -> Dict[str, Any]:
-    """Cluster all embeddings in `people_faces`, update SQLite, and crop 160x160 avatars."""
-    conn = get_connection(ctx.db_path)
-    cursor = conn.cursor()
-
-    rows = cursor.execute(
-        "SELECT face_id, embedding FROM people_faces WHERE embedding IS NOT NULL"
-    ).fetchall()
-    if not rows:
-        conn.close()
-        return {"status": "empty", "total_vectors": 0, "recurring_clusters": 0}
-
-    face_ids = [r[0] for r in rows]
-    embs = [np.frombuffer(r[1], dtype=np.float32) for r in rows]
-    X = np.vstack(embs)
-
-    t0 = time.time()
-    ranked_labels, stats = cluster_embeddings(X, thresh=thresh, min_cluster_size=min_cluster_size)
-    dim = stats["dim"]
-
-    update_tuples = [(int(ranked_labels[i]), face_ids[i]) for i in range(len(face_ids))]
-    batch_size = 2000
-    for i in range(0, len(update_tuples), batch_size):
-        cursor.executemany(
-            "UPDATE people_faces SET cluster_id = ? WHERE face_id = ?",
-            update_tuples[i : i + batch_size],
-        )
-    conn.commit()
-
+    cursor: Any,
+    cluster_ids: List[int],
+    dim: int,
+    overwrite: bool = False,
+) -> int:
+    """Crop 160x160 face thumbnails into `viewer/avatars/cluster_<id>.jpg`."""
     ctx.avatars_dir.mkdir(parents=True, exist_ok=True)
     avatars_generated = 0
-    for rank in range(min(top_avatars, stats["recurring_clusters"])):
+    for cid in cluster_ids:
+        avatar_path = ctx.avatars_dir / f"cluster_{cid}.jpg"
+        if avatar_path.exists() and not overwrite:
+            continue
+
         row = cursor.execute(
             """
             SELECT p.media_id, p.bounding_box, m.processing_path
@@ -144,7 +122,7 @@ def cluster_and_generate_avatars(
             ORDER BY p.confidence DESC
             LIMIT 1
             """,
-            (rank,),
+            (cid,),
         ).fetchone()
         if not row:
             continue
@@ -173,12 +151,225 @@ def cluster_and_generate_avatars(
                 if pw > 10 and ph > 10:
                     crop = img.crop((px, py, px + pw, py + ph))
                     crop.thumbnail((160, 160))
-                    crop.convert("RGB").save(ctx.avatars_dir / f"cluster_{rank}.jpg", "JPEG", quality=85)
+                    crop.convert("RGB").save(avatar_path, "JPEG", quality=85)
                     avatars_generated += 1
         except Exception:
             continue
+    return avatars_generated
+
+
+def cluster_and_generate_avatars(
+    ctx: ArchiveContext,
+    thresh: Optional[float] = None,
+    min_cluster_size: int = 3,
+    top_avatars: int = 30,
+    recluster: Optional[bool] = None,
+) -> Dict[str, Any]:
+    """
+    Cluster embeddings in `people_faces`, update SQLite, and crop 160x160 avatars.
+
+    By default (`recluster=False`), existing `cluster_id >= 0` clusters and manual
+    `person_name` labels are preserved: unclustered faces (`cluster_id = -2`) are matched
+    against existing cluster centroids first, and only unmatched faces are clustered into
+    new IDs above `MAX(cluster_id)`.
+    """
+    do_recluster = ctx.recluster if recluster is None else recluster
+    conn = get_connection(ctx.db_path)
+    cursor = conn.cursor()
+
+    existing_rows = cursor.execute(
+        """
+        SELECT face_id, cluster_id, person_name, embedding
+        FROM people_faces
+        WHERE embedding IS NOT NULL AND cluster_id >= 0
+        """
+    ).fetchall()
+
+    t0 = time.time()
+    batch_size = 2000
+
+    if not do_recluster and existing_rows:
+        pending_rows = cursor.execute(
+            "SELECT face_id, embedding FROM people_faces WHERE embedding IS NOT NULL AND cluster_id = -2"
+        ).fetchall()
+
+        sample_emb = np.frombuffer(existing_rows[0][3], dtype=np.float32)
+        dim = int(sample_emb.shape[0])
+
+        if not pending_rows:
+            top_cids = [
+                int(r[0])
+                for r in cursor.execute(
+                    """
+                    SELECT cluster_id
+                    FROM people_faces
+                    WHERE cluster_id >= 0
+                    GROUP BY cluster_id
+                    ORDER BY COUNT(*) DESC
+                    LIMIT ?
+                    """,
+                    (top_avatars,),
+                ).fetchall()
+            ]
+            avatars_generated = _generate_cluster_avatars(ctx, cursor, top_cids, dim=dim, overwrite=False)
+            total_vectors = int(
+                cursor.execute("SELECT COUNT(*) FROM people_faces WHERE embedding IS NOT NULL").fetchone()[0] or 0
+            )
+            recurring_clusters = int(
+                cursor.execute("SELECT COUNT(DISTINCT cluster_id) FROM people_faces WHERE cluster_id >= 0").fetchone()[0]
+                or 0
+            )
+            conn.close()
+            return {
+                "status": "complete",
+                "total_vectors": total_vectors,
+                "new_faces_clustered": 0,
+                "recurring_clusters": recurring_clusters,
+                "preserved_existing": True,
+                "avatars_generated": avatars_generated,
+                "elapsed_seconds": round(time.time() - t0, 2),
+            }
+
+        centroid_sums: Dict[int, np.ndarray] = {}
+        cluster_counts: Dict[int, int] = {}
+        cluster_names: Dict[int, Optional[str]] = {}
+        for _, cid, pname, emb_blob in existing_rows:
+            cid_int = int(cid)
+            vec = np.frombuffer(emb_blob, dtype=np.float32).copy()
+            vnorm = float(np.linalg.norm(vec))
+            if vnorm > 0:
+                vec /= vnorm
+            if cid_int not in centroid_sums:
+                centroid_sums[cid_int] = vec
+                cluster_counts[cid_int] = 1
+                cluster_names[cid_int] = pname
+            else:
+                centroid_sums[cid_int] += vec
+                cluster_counts[cid_int] += 1
+                if pname and not cluster_names.get(cid_int):
+                    cluster_names[cid_int] = pname
+
+        centroid_cids = sorted(centroid_sums.keys())
+        centroids_list: List[np.ndarray] = []
+        for cid_int in centroid_cids:
+            cvec = centroid_sums[cid_int]
+            cnorm = float(np.linalg.norm(cvec))
+            if cnorm > 0:
+                cvec = cvec / cnorm
+            centroids_list.append(cvec)
+        centroid_matrix = np.vstack(centroids_list).astype(np.float32)
+
+        eff_thresh = thresh if thresh is not None else (0.48 if dim == 512 else 0.82)
+        assignments: List[Tuple[int, Optional[str], int]] = []
+        unmatched_ids: List[int] = []
+        unmatched_vecs: List[np.ndarray] = []
+
+        for fid, emb_blob in pending_rows:
+            vec = np.frombuffer(emb_blob, dtype=np.float32).copy()
+            vnorm = float(np.linalg.norm(vec))
+            if vnorm > 0:
+                vec /= vnorm
+            sims = np.dot(centroid_matrix, vec)
+            best_idx = int(np.argmax(sims))
+            if sims[best_idx] >= eff_thresh:
+                matched_cid = centroid_cids[best_idx]
+                cnt = cluster_counts[matched_cid]
+                updated = centroid_matrix[best_idx] * cnt + vec
+                unorm = float(np.linalg.norm(updated))
+                if unorm > 0:
+                    updated /= unorm
+                centroid_matrix[best_idx] = updated
+                cluster_counts[matched_cid] = cnt + 1
+                assignments.append((matched_cid, cluster_names.get(matched_cid), fid))
+            else:
+                unmatched_ids.append(fid)
+                unmatched_vecs.append(vec)
+
+        new_clusters_created = 0
+        if unmatched_vecs:
+            unmatched_X = np.vstack(unmatched_vecs)
+            new_labels, new_stats = cluster_embeddings(
+                unmatched_X, thresh=eff_thresh, min_cluster_size=min_cluster_size
+            )
+            max_existing_cid = max(centroid_cids)
+            new_clusters_created = int(new_stats["recurring_clusters"])
+            for fid, lbl in zip(unmatched_ids, new_labels):
+                lbl_int = int(lbl)
+                final_cid = (max_existing_cid + 1 + lbl_int) if lbl_int >= 0 else -1
+                assignments.append((final_cid, None, fid))
+
+        for i in range(0, len(assignments), batch_size):
+            cursor.executemany(
+                "UPDATE people_faces SET cluster_id = ?, person_name = COALESCE(person_name, ?) WHERE face_id = ?",
+                assignments[i : i + batch_size],
+            )
+        conn.commit()
+
+        top_cids = [
+            int(r[0])
+            for r in cursor.execute(
+                """
+                SELECT cluster_id
+                FROM people_faces
+                WHERE cluster_id >= 0
+                GROUP BY cluster_id
+                ORDER BY COUNT(*) DESC
+                LIMIT ?
+                """,
+                (top_avatars,),
+            ).fetchall()
+        ]
+        avatars_generated = _generate_cluster_avatars(ctx, cursor, top_cids, dim=dim, overwrite=False)
+        total_vectors = int(
+            cursor.execute("SELECT COUNT(*) FROM people_faces WHERE embedding IS NOT NULL").fetchone()[0] or 0
+        )
+        recurring_clusters = int(
+            cursor.execute("SELECT COUNT(DISTINCT cluster_id) FROM people_faces WHERE cluster_id >= 0").fetchone()[0]
+            or 0
+        )
+        conn.close()
+        return {
+            "status": "complete",
+            "total_vectors": total_vectors,
+            "dim": dim,
+            "threshold": eff_thresh,
+            "new_faces_clustered": len(assignments),
+            "new_clusters_created": new_clusters_created,
+            "recurring_clusters": recurring_clusters,
+            "preserved_existing": True,
+            "avatars_generated": avatars_generated,
+            "elapsed_seconds": round(time.time() - t0, 2),
+        }
+
+    rows = cursor.execute(
+        "SELECT face_id, embedding FROM people_faces WHERE embedding IS NOT NULL"
+    ).fetchall()
+    if not rows:
+        conn.close()
+        return {"status": "empty", "total_vectors": 0, "recurring_clusters": 0}
+
+    face_ids = [r[0] for r in rows]
+    embs = [np.frombuffer(r[1], dtype=np.float32) for r in rows]
+    X = np.vstack(embs)
+
+    ranked_labels, stats = cluster_embeddings(X, thresh=thresh, min_cluster_size=min_cluster_size)
+    dim = stats["dim"]
+
+    update_tuples = [(int(ranked_labels[i]), face_ids[i]) for i in range(len(face_ids))]
+    for i in range(0, len(update_tuples), batch_size):
+        cursor.executemany(
+            "UPDATE people_faces SET cluster_id = ? WHERE face_id = ?",
+            update_tuples[i : i + batch_size],
+        )
+    conn.commit()
+
+    target_cids = list(range(min(top_avatars, stats["recurring_clusters"])))
+    avatars_generated = _generate_cluster_avatars(
+        ctx, cursor, target_cids, dim=dim, overwrite=do_recluster
+    )
 
     conn.close()
     stats["avatars_generated"] = avatars_generated
+    stats["preserved_existing"] = False
     stats["elapsed_seconds"] = round(time.time() - t0, 2)
     return stats

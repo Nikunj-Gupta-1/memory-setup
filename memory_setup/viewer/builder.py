@@ -212,10 +212,42 @@ def export_catalog_data_js(ctx: ArchiveContext, conn: sqlite3.Connection) -> Pat
         for r in clust_rows[9:30]
     ]
 
+    video_rows = cursor.execute(
+        """
+        SELECT
+            id,
+            current_path,
+            COALESCE(capture_timestamp, ''),
+            LOWER(COALESCE(original_ext, '')),
+            COALESCE(file_size_bytes, 0),
+            COALESCE(original_filename, current_filename, ''),
+            COALESCE(companion_role, 'none')
+        FROM media_items
+        WHERE media_type = 'video'
+        ORDER BY COALESCE(capture_timestamp, '') DESC, id DESC
+        """
+    ).fetchall()
+    videos = []
+    for vr in video_rows:
+        mid, cur_p, ts, ext, sz, orig_fn, role = vr
+        ext_clean = ext if not ext or ext.startswith(".") else f".{ext}"
+        videos.append(
+            {
+                "id": mid,
+                "src": ctx.to_viewer_web_path(cur_p),
+                "d": ts[:10] if ts else "",
+                "ext": ext_clean,
+                "sz": int(sz or 0),
+                "fn": orig_fn or Path(cur_p).name,
+                "live": role == "live_photo_video",
+            }
+        )
+
     ctx.catalog_data_js_path.parent.mkdir(parents=True, exist_ok=True)
     with open(ctx.catalog_data_js_path, "w", encoding="utf-8") as fp:
         fp.write("// Auto-generated Catalog Data for Offline Museum Viewer\n")
         fp.write(f"const ALL_PHOTOS = {json.dumps(items)};\n\n")
+        fp.write(f"const ALL_VIDEOS = {json.dumps(videos)};\n\n")
         fp.write(f"const MAP_LOCATIONS = {json.dumps(locations)};\n\n")
         fp.write(f"const CORE_CLUSTERS = {json.dumps(core_clusters)};\n\n")
         fp.write(f"const EXTENDED_CLUSTERS = {json.dumps(extended_clusters)};\n")
@@ -294,13 +326,52 @@ def run_stage5_museum(ctx: ArchiveContext, overwrite_html: bool = False) -> Dict
     return summary
 
 
+def list_person_clusters(ctx: ArchiveContext, limit: int = 100) -> List[Dict[str, Any]]:
+    """Return face clusters ordered by photo/face frequency for Control Center management."""
+    if not ctx.db_path.exists():
+        return []
+    conn = get_connection(ctx.db_path, readonly=True)
+    try:
+        rows = conn.execute(
+            """
+            SELECT cluster_id, COUNT(*), MAX(person_name)
+            FROM people_faces
+            WHERE cluster_id >= 0
+            GROUP BY cluster_id
+            ORDER BY COUNT(*) DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    clusters: List[Dict[str, Any]] = []
+    for idx, (raw_cid, raw_cnt, raw_name) in enumerate(rows):
+        cid = int(raw_cid)
+        custom_name = (str(raw_name).strip() if raw_name else "")
+        default_name = f"Family Member {cid + 1}" if idx < 9 else f"Recurring Person {cid + 1}"
+        clusters.append(
+            {
+                "cluster_id": cid,
+                "count": int(raw_cnt),
+                "person_name": custom_name,
+                "default_name": default_name,
+                "display_name": custom_name or default_name,
+                "has_avatar": (ctx.avatars_dir / f"cluster_{cid}.jpg").exists(),
+            }
+        )
+    return clusters
+
+
 def rename_person_clusters(ctx: ArchiveContext, updates: List[Dict[str, Any]]) -> int:
     """Persist custom cluster names directly to SQLite and re-export catalog_data.js."""
     conn = get_connection(ctx.db_path)
     for item in updates:
+        clean_name = str(item.get("name") or "").strip() or None
         conn.execute(
             "UPDATE people_faces SET person_name = ? WHERE cluster_id = ?",
-            (str(item["name"]).strip(), int(item["cluster_id"])),
+            (clean_name, int(item["cluster_id"])),
         )
     conn.commit()
     export_catalog_data_js(ctx, conn)
@@ -310,11 +381,28 @@ def rename_person_clusters(ctx: ArchiveContext, updates: List[Dict[str, Any]]) -
 
 def merge_person_clusters(ctx: ArchiveContext, source_id: int, target_id: int) -> None:
     """Merge source_id cluster into target_id cluster in SQLite and re-export catalog_data.js."""
+    src_id = int(source_id)
+    tgt_id = int(target_id)
+    if src_id == tgt_id:
+        raise ValueError("Source and target cluster IDs must differ.")
+
     conn = get_connection(ctx.db_path)
-    conn.execute(
-        "UPDATE people_faces SET cluster_id = ? WHERE cluster_id = ?",
-        (int(target_id), int(source_id)),
-    )
+    row = conn.execute(
+        "SELECT MAX(person_name) FROM people_faces WHERE cluster_id = ?",
+        (tgt_id,),
+    ).fetchone()
+    target_name = row[0] if row and row[0] else None
+
+    if target_name is not None:
+        conn.execute(
+            "UPDATE people_faces SET cluster_id = ?, person_name = ? WHERE cluster_id = ?",
+            (tgt_id, target_name, src_id),
+        )
+    else:
+        conn.execute(
+            "UPDATE people_faces SET cluster_id = ? WHERE cluster_id = ?",
+            (tgt_id, src_id),
+        )
     conn.commit()
     export_catalog_data_js(ctx, conn)
     conn.close()
@@ -334,13 +422,20 @@ def quarantine_homework_files(ctx: ArchiveContext) -> int:
         """
     ).fetchall()
     moved = 0
+    archive_resolved = archive_dir.resolve()
     for mid, cur_rel in rows:
         src = ctx.resolve(cur_rel)
-        if src.exists() and src.parent != archive_dir:
+        if src.exists() and src.parent.resolve() != archive_resolved:
             dst = archive_dir / src.name
+            if dst.exists():
+                dst = archive_dir / f"{mid}_{src.name}"
             shutil.move(str(src), str(dst))
             new_rel = dst.relative_to(ctx.archive_root).as_posix()
             conn.execute("UPDATE media_items SET current_path = ? WHERE id = ?", (new_rel, mid))
+            conn.execute(
+                "UPDATE processing_inputs SET processing_path = ? WHERE media_id = ? AND is_reused_original = 1",
+                (new_rel, mid),
+            )
             moved += 1
     conn.commit()
     export_catalog_data_js(ctx, conn)

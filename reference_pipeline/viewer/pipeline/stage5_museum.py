@@ -131,8 +131,8 @@ def generate_viewer_html(conn: sqlite3.Connection = None) -> Path:
         try:
             with open(viewer_path, 'r', encoding='utf-8') as f:
                 existing = f.read()
-            if 'catalog_data.js' in existing and 'peopleManagerModal' in existing:
-                print(f"✓ Preserving existing interactive Offline Museum Viewer with People Manager: {viewer_path}")
+            if 'catalog_data.js' in existing:
+                print(f"✓ Preserving existing Offline Museum Viewer: {viewer_path}")
                 return viewer_path
         except Exception:
             pass

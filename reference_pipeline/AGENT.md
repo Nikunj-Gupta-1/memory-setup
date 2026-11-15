@@ -14,7 +14,7 @@ This environment operates across two distinct workspaces:
    Two-folder archive contract (`content/` and `viewer/`). Stage 4 Vision (`stage4_vision.py`) runs memory-bounded Ollama (`moondream`) captioning with runner recycling.
 2. **Universal Standalone Application Repository**:  
    Path: `Memory_Setup/` (repo root `../../`)  
-   **Implemented & Published**: Full GUI Control Center, CLI (`memory-setup`), 1-click Mac/Windows launchers, consolidated Python 3.12 `.venv`, and `23/23` passing tests. Public GitHub repo: `https://github.com/Nikunj-Gupta-1/memory-setup`.
+   **Implemented & Published**: Full GUI Control Center, CLI (`memory-setup`), 1-click Mac/Windows launchers, consolidated Python 3.12 `.venv`, incremental ingestion/clustering, Video Viewer with HTTP `206` streaming, and `35/35` passing tests. Public GitHub repo: `https://github.com/Nikunj-Gupta-1/memory-setup`.
 
 ---
 
@@ -29,7 +29,7 @@ This environment operates across two distinct workspaces:
 │   ├── videos/YYYY/                    # 1,337 master videos partitioned by year (2008–2026)
 │   └── documents/                      # Preserved non-media documents
 └── viewer/                             # APPLICATION RUNTIME & PIPELINE
-    ├── viewer.html                     # Offline Museum Web UI (timeline, search, map, people, cleanup)
+    ├── viewer.html                     # Read-only Offline Museum Web UI (timeline, videos, search, map, people filter)
     ├── server.py                       # Lightweight local streaming server (http://localhost:8080)
     ├── start_viewer.command            # Shell script launcher
     ├── catalog.sqlite                  # SQLite 3.46+ database (WAL enabled, FTS5 virtual search)
@@ -72,7 +72,7 @@ This environment operates across two distinct workspaces:
    * When processing image streams, always clamp context: `"options": {"num_ctx": 1024, "num_predict": 128, "temperature": 0}`.
    * Periodically recycle the runner via `{"model": "moondream:latest", "keep_alive": 0}` (`stage4_vision.py` recycles every batch of 10 images; `Memory_Setup` recycles every 50 in Whisper / 200 in Turbo). In ~0.015s, `llama-server` unloads, flushing accumulated cache and Metal buffers back to macOS.
 5. **Anti-Clobber Rule for `viewer.html`**:  
-   Never overwrite `viewer/viewer.html` with dummy or sample templates. `viewer.html` is the full production UI with 35-city Leaflet mapping, family face managers, and timeline scrubbers. Data updates must only touch `catalog_data.js` and `catalog.json` via `export_viewer_data.py`.
+   Never overwrite `viewer/viewer.html` with dummy or sample templates. `viewer.html` is the read-only production UI with 35-city Leaflet mapping, Video Cinema playback, family people filtering, and timeline scrubbers. Data updates must only touch `catalog_data.js` and `catalog.json` via `export_viewer_data.py`.
 6. **Homework / Document Classifier Rules**:  
    Do not use naive keyword matching (`'written on it'`, `'piece of paper'`). In `stage4_vision.py`, the high-precision classifier enforces:
    * Disqualify if faces are detected (`has_faces == True`).
@@ -87,7 +87,7 @@ This environment operates across two distinct workspaces:
 * **Launch Museum Viewer**:
   ```bash
   cd <archive_root>/viewer && ../../.venv/bin/python server.py
-  # Or from repo root: memory-setup serve <archive_root>
+  # Or launch GUI Control Center: memory-setup --archive <archive_root>
   # Open in browser: http://localhost:8080/viewer/viewer.html
   ```
 * **Run / Resume Background Vision Analysis**:

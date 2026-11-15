@@ -24,8 +24,12 @@ Built and battle-tested on a real **33,771-file personal archive (2007–2026)**
   * Isolates math notebooks, worksheets, receipts, and code screenshots while disqualifying photos with detected faces or celebration scenes (birthday cakes, weddings, churches, dining tables).
 * **Offline Spatial Reverse-Geocoder**:
   * `scipy.spatial.cKDTree` over 3D ECEF coordinates with a strict `150.0 km` Haversine cutoff so remote ocean coordinates never false-match distant coastal cities.
+* **Offline Video Cinema & Read-Only Dual-Theme Museum UI**:
+  * Interactive read-only `viewer.html` (Warm Archival Daylight & Darkroom themes) with keyboard-navigable lightbox across both Photos and **Videos** (`ALL_VIDEOS`), HTTP `206` byte-range video streaming in `server.py` and the Control Center, Live Photo clip toggles, **People** & **World Map** filtering, and **Open in System Player** (`/api/open-media`) + download fallbacks for legacy `.avi` clips.
+* **Incremental Re-Run Safe (With Explicit GUI Rebuild Toggles)**:
+  * Drop new photo/video folders into an existing archive and re-run **Organize & Build Museum**: runtime scripts/DB files at archive root are ignored, exact duplicates are caught cleanly, only new media enters Stages 1–4B, and existing AI captions, custom people names, and merged clusters are preserved unless **Force Reprocess Existing Media** (`--reprocess`) or **Force Full Face Re-Cluster** (`--recluster`) is checked in the Control Center GUI.
 * **Anti-Clobber Museum Protection & 15.0 GiB Disk Safety Floor**:
-  * Never overwrites a customized `viewer/viewer.html` or manual `person_name` edits during rebuilds (`--overwrite-html` required to reset HTML), and halts heavy ingestion if free disk drops below `15.0 GiB`.
+  * Never overwrites a customized `viewer/viewer.html` or manual `person_name` edits during rebuilds (`--overwrite-html` required to reset HTML), keeps all mutating controls inside the **Memory Setup Control Center**, and halts heavy ingestion if free disk drops below `15.0 GiB`.
 
 ---
 
@@ -49,12 +53,12 @@ Memory_Setup/
 │   ├── AGENT.md
 │   └── viewer/
 │       ├── pipeline/              # Original Stage 1-5 scripts + face_extractor.swift
-│       ├── viewer.html            # Production Offline Museum single-page UI
-│       ├── server.py              # Zero-dependency museum server + live rename/merge API
+│       ├── viewer.html            # Read-only Offline Museum single-page UI
+│       ├── server.py              # Zero-dependency museum server (HTTP 206 streaming)
 │       ├── start_viewer.command   # 1-click archive museum launcher
 │       └── *.md                   # Manifesto, Progress Report, System Ledger & Handoff
 ├── scripts/                       # Native macOS universal launcher C source
-├── tests/                         # 29 unit & integration tests (offline/mocked VLM)
+├── tests/                         # 36 unit & integration tests (offline/mocked VLM)
 ├── pyproject.toml
 ├── Memory Setup.app/              # 1-click zero-Terminal macOS app bundle
 ├── Start_Memory_Setup.command     # macOS setup & detached launcher
@@ -117,10 +121,10 @@ Memory Setup launches directly as a native desktop **Control Center** window (ba
 2. **Choose Folders & Mode**:
    * For a **Safe First Test** (recommended with 20–50 sample photos): select **Safe Copy (Keep Originals)** -> pick an empty destination via **Browse Archive...** (e.g. `Desktop/TestMuseum`) and pick your sample folder via **Browse Source...** (`Desktop/TestPhotos`). Your original files remain untouched.
    * Click **Audit Folder** to check free disk space (`>= 15.0 GiB` safety floor) and verify local tools.
-3. **Run & Browse**:
-   * Choose **Whisper** (lowest RAM / coolest) or **Turbo**, then click **Organize & Build Museum**.
+3. **Run, Manage & Browse (All Edits in Control Center Only)**:
+   * Choose **Whisper** (lowest RAM / coolest) or **Turbo**, leave **Force Reprocess** / **Force Full Face Re-Cluster** unchecked for incremental additions (or check them for a full rebuild), then click **Organize & Build Museum**.
    * Use **Pause & Flush RAM** anytime to stop cleanly and resume later with **Resume Vision AI Only**.
-   * Click **Quarantine Docs** to move flagged homework/notes into `content/documents/homework_archive/`, or click **Open Offline Museum Viewer** to explore timeline, world map, people clusters (rename/merge live), and full-text search.
+   * Use **Manage & Merge People** to rename or merge face clusters directly in SQLite & `catalog_data.js`, click **Quarantine Docs** to move flagged homework/notes into `content/documents/homework_archive/`, or click **Open Offline Museum Viewer** to explore photos, videos, world map, people filters, and full-text search in the read-only viewer.
 
 <details>
 <summary>Optional Headless CLI Commands (Advanced Users)</summary>

@@ -98,6 +98,8 @@ def _cmd_run(args: argparse.Namespace) -> int:
         enable_biometrics=not args.no_biometrics,
         enable_vision=not args.no_vision,
         ollama_model=args.model,
+        reprocess=args.reprocess,
+        recluster=args.recluster,
     )
 
     diag = run_diagnostics(archive_path=ctx.archive_root, mode=ctx.mode, ollama_model=ctx.ollama_model)
@@ -121,14 +123,14 @@ def _cmd_run(args: argparse.Namespace) -> int:
             res1 = run_stage1_consolidation(ctx, progress_cb=_print_progress)
             print(f"Stage 1 summary: {json.dumps(res1)}")
         if "stage2" in stages and not stop_event.is_set():
-            res2 = run_stage2_standardization(ctx, progress_cb=_print_progress)
+            res2 = run_stage2_standardization(ctx, progress_cb=_print_progress, reprocess=ctx.reprocess)
             print(f"Stage 2 summary: {json.dumps(res2)}")
         if "stage3" in stages and not stop_event.is_set():
-            res3 = run_stage3_validation(ctx, progress_cb=_print_progress)
+            res3 = run_stage3_validation(ctx, progress_cb=_print_progress, reprocess=ctx.reprocess)
             print(f"Stage 3 summary: {json.dumps(res3)}")
         if "stage4_faces" in stages and ctx.enable_biometrics and not stop_event.is_set():
-            scan = run_biometric_face_scan(ctx, progress_cb=_print_progress)
-            clus = cluster_and_generate_avatars(ctx)
+            scan = run_biometric_face_scan(ctx, progress_cb=_print_progress, reprocess=ctx.reprocess)
+            clus = cluster_and_generate_avatars(ctx, recluster=ctx.recluster)
             print(f"Stage 4A summary: {json.dumps({'scan': scan, 'clustering': clus})}")
         if "stage4_vision" in stages and ctx.enable_vision and not stop_event.is_set():
             res4b = run_vision_pipeline(
@@ -202,6 +204,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_run.add_argument("--vision-limit", type=int, default=None, help="Cap number of VLM photos in this run")
     p_run.add_argument("--model", type=str, default="moondream:latest", help="Ollama vision model")
     p_run.add_argument("--overwrite-html", action="store_true", help="Allow overwriting viewer.html during Stage 5")
+    p_run.add_argument("--reprocess", action="store_true", help="Force re-extraction of EXIF, proxies, validation, and face scans")
+    p_run.add_argument("--recluster", action="store_true", help="Force full re-clustering of all face embeddings (resets cluster IDs)")
     p_run.add_argument("--force", action="store_true", help="Override free disk space safety warning")
 
     p_sync = subparsers.add_parser("sync", help="Rebuild FTS5 index, catalog_data.js, and Offline Museum assets")

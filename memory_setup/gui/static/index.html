@@ -58,6 +58,26 @@
         <label><input type="checkbox" id="chkBiometrics" checked> Enable Face Recognition &amp; Family Clustering (ArcFace 512-d)</label>
         <label><input type="checkbox" id="chkVision" checked> Enable Local Vision AI Captions &amp; Homework Detection (Moondream)</label>
       </div>
+
+      <div class="advanced-box">
+        <div class="advanced-head">
+          <span class="title">Incremental &amp; Rebuild Options</span>
+          <span class="hint">Leave unchecked for safe incremental updates that preserve existing AI captions &amp; people names.</span>
+        </div>
+        <div class="checks-row" style="margin-top: 8px;">
+          <label title="Re-run EXIF extraction, web proxy generation, image validation, and face detection across all media items (existing AI captions stay preserved).">
+            <input type="checkbox" id="chkReprocess">
+            <span>Force Reprocess Existing Media <small class="muted-inline">(EXIF, proxies, validation &amp; face scan)</small></span>
+          </label>
+          <label title="Re-cluster all face embeddings from scratch and regenerate avatar crops.">
+            <input type="checkbox" id="chkRecluster" onchange="toggleReclusterWarning()">
+            <span>Force Full Face Re-Cluster <small class="muted-inline">(rebuilds all cluster IDs &amp; avatars)</small></span>
+          </label>
+        </div>
+        <div id="reclusterWarn" class="warn-banner" style="display: none;">
+          Force Full Face Re-Cluster reassigns all cluster IDs and overwrites avatar thumbnails; custom people names and merges will need to be re-verified afterward.
+        </div>
+      </div>
     </section>
 
     <!-- Step 2: Setup Wizard & Pre-Flight Diagnostics -->
@@ -96,6 +116,7 @@
       <div class="metrics-grid">
         <div class="metric-card"><div class="val" id="mTotal">0</div><div class="lbl">Total Items</div></div>
         <div class="metric-card"><div class="val" id="mPhotos">0</div><div class="lbl">Master Photos</div></div>
+        <div class="metric-card"><div class="val" id="mVideos">0</div><div class="lbl">Videos</div></div>
         <div class="metric-card"><div class="val" id="mGeocoded">0</div><div class="lbl">Geocoded</div></div>
         <div class="metric-card"><div class="val" id="mFaces">0</div><div class="lbl">Faces Indexed</div></div>
         <div class="metric-card"><div class="val" id="mCaptioned">0</div><div class="lbl">AI Captioned</div></div>
@@ -104,7 +125,7 @@
 
       <div class="progress-wrap">
         <div class="status-line">
-          <strong id="progressMsg">Ready to organize or sync your archive.</strong>
+          <strong id="progressMsg">Ready — incremental mode preserves existing AI captions &amp; face clusters when adding new media.</strong>
           <span id="progressCounts">0 / 0</span>
         </div>
         <div class="progress-bar-bg">
@@ -121,11 +142,58 @@
         <button id="btnResumeVision" class="btn btn-secondary" onclick="startVisionOnly()">🧠 Resume Vision AI Only</button>
         <button id="btnStop" class="btn btn-warning" onclick="stopPipeline()" disabled>⏸️ Pause &amp; Flush RAM</button>
         <button class="btn btn-secondary" onclick="syncMuseum()">🔄 Refresh Museum Data</button>
-        <button class="btn btn-secondary" onclick="quarantineHomework()">📄 Quarantine Docs</button>
+        <button id="btnManagePeople" class="btn btn-secondary" onclick="openPeopleManager()">👥 Manage &amp; Merge People</button>
+        <button id="btnQuarantineDocs" class="btn btn-secondary" onclick="quarantineHomework()">📄 Quarantine Docs</button>
         <a id="btnOpenMuseum" class="btn btn-success" href="/archive/viewer/viewer.html" target="_blank" style="margin-left: auto;">🏛️ Open Offline Museum Viewer</a>
       </div>
     </section>
   </main>
+
+  <!-- People Cluster Manager Modal (all edits write directly to SQLite & catalog_data.js) -->
+  <div id="peopleManagerModal" class="modal-backdrop" onclick="closePeopleManager(event)" role="dialog" aria-modal="true" aria-label="Manage and merge people">
+    <div class="modal-panel" onclick="event.stopPropagation()">
+      <div class="modal-head">
+        <div>
+          <h2>Manage &amp; Merge People Clusters</h2>
+          <p class="modal-sub">All edits write directly to SQLite and refresh the Offline Museum catalog immediately.</p>
+        </div>
+        <button class="modal-close" onclick="closePeopleManager()" type="button" aria-label="Close modal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="merge-card">
+          <div class="merge-title">Merge Duplicate Identity</div>
+          <div class="merge-sub">Combine all faces from one cluster into another, keeping the target identity.</div>
+          <div class="merge-row">
+            <select id="mergeSourceSelect" class="input-select" aria-label="Source cluster"></select>
+            <span class="muted-inline" style="font-weight: 600;">into</span>
+            <select id="mergeTargetSelect" class="input-select" aria-label="Target cluster"></select>
+            <button id="btnMergeClusters" class="btn btn-warning" onclick="executeClusterMerge()" type="button">Merge Clusters</button>
+          </div>
+        </div>
+
+        <div id="peopleModalFeedback" class="modal-feedback" style="display: none;"></div>
+
+        <table class="name-table">
+          <thead>
+            <tr>
+              <th>Portrait</th>
+              <th>Cluster</th>
+              <th>Faces</th>
+              <th>Display Name</th>
+            </tr>
+          </thead>
+          <tbody id="namingTableBody"></tbody>
+        </table>
+      </div>
+      <div class="modal-foot">
+        <span id="peopleClusterCountLabel" class="muted-inline">0 clusters loaded</span>
+        <div class="row">
+          <button class="btn btn-secondary" onclick="closePeopleManager()" type="button">Close</button>
+          <button id="btnSavePeopleNames" class="btn" onclick="saveCustomNames()" type="button">Save Names</button>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <script src="/app.js"></script>
 </body>

@@ -5,6 +5,7 @@ import sys
 import threading
 import time
 import types
+import urllib.error
 import urllib.request
 from pathlib import Path
 from unittest.mock import patch
@@ -85,18 +86,72 @@ def test_gui_server_endpoints_and_museum_mount(tmp_path: Path) -> None:
 
         q_res = _post_json(f"{base}/api/homework/quarantine", {"archive_path": str(arch)})
         assert q_res["ok"] is True
+        assert "archive" in q_res
+
+        with urllib.request.urlopen(f"{base}/api/people/clusters", timeout=5) as r:
+            clusters_before = json.loads(r.read().decode("utf-8"))
+        assert clusters_before["ok"] is True
+        assert len(clusters_before["clusters"]) == 2
 
         ren = _post_json(f"{base}/api/people/rename", {"updates": [{"cluster_id": 0, "name": "Nikunj"}]})
         assert ren["ok"] is True
+        assert any(c["cluster_id"] == 0 and c["display_name"] == "Nikunj" for c in ren["clusters"])
 
         mrg = _post_json(f"{base}/api/people/merge", {"source_id": 1, "target_id": 0})
         assert mrg["ok"] is True
+        assert len(mrg["clusters"]) == 1
+        assert mrg["clusters"][0]["cluster_id"] == 0
+        assert mrg["clusters"][0]["count"] == 2
+        assert mrg["clusters"][0]["display_name"] == "Nikunj"
 
-        # Live mounted museum viewer HTML
+        # Self-merge rejected cleanly with 400
+        bad_merge = urllib.request.Request(
+            f"{base}/api/people/merge",
+            data=json.dumps({"source_id": 0, "target_id": 0}).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            urllib.request.urlopen(bad_merge, timeout=5)
+            assert False, "Expected 400 for self-merge"
+        except urllib.error.HTTPError as exc:
+            assert exc.code == 400
+
+        # Control Center HTML/JS exposes reprocess, recluster, people manager, and quarantine
+        with urllib.request.urlopen(f"{base}/", timeout=5) as r:
+            ctrl_html = r.read().decode("utf-8")
+            for marker in ("chkReprocess", "chkRecluster", "peopleManagerModal", "openPeopleManager", "btnQuarantineDocs"):
+                assert marker in ctrl_html
+        with urllib.request.urlopen(f"{base}/app.js", timeout=5) as r:
+            ctrl_js = r.read().decode("utf-8")
+            for marker in ("reprocess", "recluster", "/api/people/clusters", "/api/people/rename", "/api/people/merge"):
+                assert marker in ctrl_js
+
+        # POST /api/pipeline/start forwards reprocess & recluster toggles to PipelineManager
+        with patch.object(server.app_state.manager, "start", return_value=True) as mock_start:
+            start_res = _post_json(
+                f"{base}/api/pipeline/start",
+                {
+                    "archive_path": str(arch),
+                    "mode": "in_place",
+                    "force": True,
+                    "reprocess": True,
+                    "recluster": True,
+                },
+            )
+            assert start_res["started"] is True
+            mock_start.assert_called_once()
+            started_ctx = mock_start.call_args[0][0]
+            assert started_ctx.reprocess is True
+            assert started_ctx.recluster is True
+
+        # Live mounted museum viewer HTML (read-only)
         with urllib.request.urlopen(f"{base}/archive/viewer/viewer.html", timeout=5) as r:
             assert r.status == 200
             html = r.read().decode("utf-8")
             assert "<html" in html.lower()
+            assert "peopleManagerModal" not in html
+            assert "cleanup_homework.sh" not in html
 
         # App icon asset served cleanly
         with urllib.request.urlopen(f"{base}/icon.png", timeout=5) as r:

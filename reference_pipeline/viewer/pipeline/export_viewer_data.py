@@ -106,6 +106,35 @@ def export_all():
     clust_rows = cursor.fetchall()
     core_clusters = [{'id': r[0], 'count': r[1], 'name': r[2] or f"Family Member {r[0]+1}"} for r in clust_rows[:9]]
     extended_clusters = [{'id': r[0], 'count': r[1], 'name': r[2] or f"Recurring Person {r[0]+1}"} for r in clust_rows[9:30]]
+
+    # 5. Videos
+    cursor.execute("""
+        SELECT
+            id,
+            current_path,
+            COALESCE(capture_timestamp, ''),
+            LOWER(COALESCE(original_ext, '')),
+            COALESCE(file_size_bytes, 0),
+            COALESCE(original_filename, current_filename, ''),
+            COALESCE(companion_role, 'none')
+        FROM media_items
+        WHERE media_type = 'video'
+        ORDER BY COALESCE(capture_timestamp, '') DESC, id DESC
+    """)
+    videos = []
+    for vr in cursor.fetchall():
+        mid, cur_p, ts, ext, sz, orig_fn, role = vr
+        src_web = ('../' + cur_p) if cur_p.startswith('content/') else cur_p
+        ext_clean = ext if not ext or ext.startswith('.') else f'.{ext}'
+        videos.append({
+            'id': mid,
+            'src': src_web,
+            'd': ts[:10] if ts else '',
+            'ext': ext_clean,
+            'sz': int(sz or 0),
+            'fn': orig_fn or Path(cur_p).name,
+            'live': role == 'live_photo_video'
+        })
     
     conn.close()
     
@@ -115,6 +144,7 @@ def export_all():
     with open(data_js_path, 'w', encoding='utf-8') as f:
         f.write("// Auto-generated Catalog Data for Offline Museum Viewer\n")
         f.write(f"const ALL_PHOTOS = {json.dumps(items)};\n\n")
+        f.write(f"const ALL_VIDEOS = {json.dumps(videos)};\n\n")
         f.write(f"const MAP_LOCATIONS = {json.dumps(locations)};\n\n")
         f.write(f"const CORE_CLUSTERS = {json.dumps(core_clusters)};\n\n")
         f.write(f"const EXTENDED_CLUSTERS = {json.dumps(extended_clusters)};\n")

@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS media_items (
     capture_timestamp TEXT,
     capture_source TEXT DEFAULT 'none',
     processing_status TEXT NOT NULL,
+    face_scanned INTEGER DEFAULT 0,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -138,9 +139,77 @@ def get_connection(db_path: Path, readonly: bool = False) -> sqlite3.Connection:
     return conn
 
 
+def _parse_iso_utc(raw: Optional[str]) -> Optional[datetime]:
+    if not raw:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    except ValueError:
+        return None
+
+
+def backfill_legacy_face_scanned(conn: sqlite3.Connection, reports_dir: Path) -> int:
+    """
+    Mark previously scanned zero-face photos as `face_scanned = 1` when a completed
+    legacy Stage 4 checkpoint (`stage4_insightface_checkpoint.json`) covers them.
+    """
+    ckpt_path = reports_dir / "stage4_insightface_checkpoint.json"
+    if not ckpt_path.is_file():
+        return 0
+    try:
+        ckpt = json.loads(ckpt_path.read_text(encoding="utf-8"))
+        scanned = int(ckpt.get("scanned") or 0)
+        total = int(ckpt.get("total") or 0)
+        ckpt_dt = _parse_iso_utc(ckpt.get("updated_at"))
+    except Exception:
+        return 0
+
+    if total <= 0 or scanned < total or ckpt_dt is None:
+        return 0
+
+    pending_rows = conn.execute(
+        "SELECT id, created_at FROM media_items "
+        "WHERE media_type = 'photo' AND COALESCE(face_scanned, 0) = 0"
+    ).fetchall()
+    if not pending_rows:
+        return 0
+
+    covered_ids = []
+    for row in pending_rows:
+        mid = row[0]
+        created_dt = _parse_iso_utc(row[1])
+        if created_dt is not None and created_dt <= ckpt_dt:
+            covered_ids.append((mid,))
+
+    if not covered_ids:
+        return 0
+
+    conn.executemany("UPDATE media_items SET face_scanned = 1 WHERE id = ?", covered_ids)
+    return len(covered_ids)
+
+
 def ensure_schema_migrations(conn: sqlite3.Connection) -> None:
     """Idempotently migrate older catalog.sqlite databases without data loss."""
     cursor = conn.cursor()
+    cursor.execute("PRAGMA table_info(media_items)")
+    media_cols = {row[1] for row in cursor.fetchall()}
+    if media_cols and "face_scanned" not in media_cols:
+        conn.execute("ALTER TABLE media_items ADD COLUMN face_scanned INTEGER DEFAULT 0")
+        conn.execute(
+            "UPDATE media_items SET face_scanned = 1 "
+            "WHERE id IN (SELECT DISTINCT media_id FROM people_faces)"
+        )
+
+    if media_cols:
+        db_rows = conn.execute("PRAGMA database_list").fetchall()
+        for _, db_name, db_file in db_rows:
+            if db_name == "main" and db_file:
+                backfill_legacy_face_scanned(conn, Path(db_file).parent / "reports")
+                break
+
     cursor.execute("PRAGMA table_info(processing_inputs)")
     cols = {row[1] for row in cursor.fetchall()}
     if cols and "dhash" not in cols:

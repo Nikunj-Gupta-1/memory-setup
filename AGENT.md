@@ -7,19 +7,20 @@
 
 ## 1. Current Status & Architecture
 
-* **Standalone App (`memory_setup/`)**: **Implemented & Verified** (`29/29` pytest checks passing).
+* **Standalone App (`memory_setup/`)**: **Implemented & Verified** (`36/36` pytest checks passing).
 * **Public Repository**: `https://github.com/Nikunj-Gupta-1/memory-setup` (includes `memory_setup/` standalone package, `reference_pipeline/` scripts/ledgers with zero personal data, and `tests/`).
 * **Local Personal Archive (Gitignored)**: Any live archive operated alongside this repository lives under gitignored `archive/` (`archive/content/` + `archive/viewer/`) using the unified Python 3.12 `.venv` at the repository root. **Never** stage, commit, or push anything inside `archive/`, `content/`, `*.sqlite*`, `.processing_cache/`, `avatars/`, `catalog_data.js`, `catalog.json`, `ai_manifest.*`, or `viewer/content` symlinks.
 * **1-Click Launchers**: `Memory Setup.app` / `Start_Memory_Setup.command` (macOS, zero-Terminal after setup) and `Start_Memory_Setup.bat` -> `Memory Setup.lnk` (Windows, `pythonw.exe` silent shortcut).
 
 The user contract:
 1. Ingest any chaotic folder of photos/videos in any arbitrary nested hierarchy (`sniffer.py` magic-byte header detection + `companions.py` Live Photo / sidecar grouping).
-2. 100% GUI Control Center (`http://127.0.0.1:8765`, zero CLI required) featuring native folder pickers, pre-flight audit, **Start Ollama**, live-progress **Pull Moondream**, 1-click **Install Face AI**, **Quarantine Docs**, and **Open Offline Museum Viewer**.
+2. 100% GUI Control Center (`http://127.0.0.1:8765`, zero CLI required) featuring native folder pickers, pre-flight audit, incremental **Force Reprocess** / **Force Full Face Re-Cluster** toggles, **Start Ollama**, live-progress **Pull Moondream**, 1-click **Install Face AI**, **Manage & Merge People** (SQLite rename/merge modal), **Quarantine Docs**, and **Open Offline Museum Viewer**. All archive-mutating actions live exclusively in the Control Center GUI (`viewer.html` is strictly read-only exhibition/playback).
 3. **In-Place Reorganization Mode** (atomic pointer renames, 0 extra disk space) and **Safe Copy Mode** (preserves source originals with dedicated Archive + Source folder pickers).
 4. Memory-bounded VLM processing (single-worker `MemoryBoundedOllamaClient`, `cache_prompt: false`, `num_ctx: 1024`, `num_predict: 128`, **Whisper Mode** recycle every `50` items / **Turbo Mode** every `200` items, RSS watchdog).
-5. Strict two-folder archive contract:
+5. **Incremental Re-Run Idempotency (`reprocess=False`, `recluster=False`)**: Adding new folders to an existing archive skips archive-root runtime files, backfills missing `sha256_original` lazily by file size for exact dedupe, processes only unextracted EXIF/proxies/unvalidated images and `face_scanned = 0` photos, preserves existing `ai_descriptions` and manual `people_faces` cluster IDs/names (matching new faces against existing centroids first), and only updates missing avatars.
+6. Strict two-folder archive contract:
    * **`content/`**: `images/YYYY/`, `videos/YYYY/`, and `documents/`.
-   * **`viewer/`**: Self-contained Offline Museum (`viewer.html`, `catalog.sqlite` with FTS5 `ai_search_fts`, `catalog_data.js`, `catalog.json`, `avatars/`, `.processing_cache/`, `server.py`, `start_viewer.command`, `start_viewer.bat`).
+   * **`viewer/`**: Self-contained Offline Museum (`viewer.html` with Daylight/Darkroom themes + Video Viewer tab & lightbox, `catalog.sqlite` with FTS5 `ai_search_fts`, `catalog_data.js` including `ALL_VIDEOS`, `catalog.json`, `avatars/`, `.processing_cache/`, HTTP `206` byte-range `server.py` + `/api/open-media`, `start_viewer.command`, `start_viewer.bat`).
 
 ---
 
@@ -39,8 +40,8 @@ Key reference files to consult:
 * [`stage4_vision.py`](reference_pipeline/viewer/pipeline/stage4_vision.py): Memory-bounded Ollama Moondream vision processor with periodic recycling
 * [`stage5_museum.py`](reference_pipeline/viewer/pipeline/stage5_museum.py): FTS5 search indexing & museum export
 * [`export_viewer_data.py`](reference_pipeline/viewer/pipeline/export_viewer_data.py): Generates `catalog_data.js` and `catalog.json`
-* [`server.py`](memory_setup/viewer/template/server.py): Zero-dependency local streaming HTTP server + live rename/merge/quarantine API
-* [`viewer.html`](reference_pipeline/viewer/viewer.html): Master museum UI
+* [`server.py`](memory_setup/viewer/template/server.py): Zero-dependency local HTTP 206 streaming & `/api/open-media` server
+* [`viewer.html`](reference_pipeline/viewer/viewer.html): Master read-only Offline Museum UI
 
 ---
 
