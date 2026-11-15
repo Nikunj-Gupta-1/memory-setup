@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+from collections import deque
 from datetime import datetime, timezone
 import hashlib
 import hmac
@@ -305,6 +306,75 @@ def _get_shutdown_event(server: Any) -> threading.Event:
     return evt
 
 
+_LOGIN_MAX_ATTEMPTS = 5
+_LOGIN_WINDOW_SECONDS = 60.0
+_LOGIN_GLOBAL_MAX_ATTEMPTS = 25
+_LOGIN_GLOBAL_WINDOW_SECONDS = 10.0
+
+
+def _get_rate_limiter_state(server: Any) -> Tuple[threading.Lock, Dict[str, Any], Any]:
+    state = getattr(server, "museum_rate_limit_state", None)
+    if state is None:
+        state = (threading.Lock(), {}, deque())
+        server.museum_rate_limit_state = state
+    return state
+
+
+def _get_login_client_key(handler: http.server.BaseHTTPRequestHandler) -> str:
+    peer = str((handler.client_address or ("", 0))[0] or "")
+    # Trust Cloudflare/proxy forwarding headers only when the TCP peer is loopback (e.g. local cloudflared tunnel).
+    if peer in ("127.0.0.1", "::1"):
+        cf_ip = str(handler.headers.get("CF-Connecting-IP") or "").strip()
+        if cf_ip:
+            return cf_ip
+        xff = str(handler.headers.get("X-Forwarded-For") or "").strip()
+        if xff:
+            return xff.split(",", 1)[0].strip() or peer
+    return peer or "unknown"
+
+
+def _prune_window(bucket: Any, cutoff: float) -> None:
+    while bucket and bucket[0] < cutoff:
+        bucket.popleft()
+
+
+def _is_login_rate_limited(server: Any, client_key: str) -> bool:
+    lock, per_ip, global_q = _get_rate_limiter_state(server)
+    now = time.monotonic()
+    with lock:
+        _prune_window(global_q, now - _LOGIN_GLOBAL_WINDOW_SECONDS)
+        if len(global_q) >= _LOGIN_GLOBAL_MAX_ATTEMPTS:
+            return True
+        bucket = per_ip.get(client_key)
+        if bucket is not None:
+            _prune_window(bucket, now - _LOGIN_WINDOW_SECONDS)
+            if not bucket:
+                per_ip.pop(client_key, None)
+            elif len(bucket) >= _LOGIN_MAX_ATTEMPTS:
+                return True
+    return False
+
+
+def _record_login_failure(server: Any, client_key: str) -> None:
+    lock, per_ip, global_q = _get_rate_limiter_state(server)
+    now = time.monotonic()
+    with lock:
+        bucket = per_ip.get(client_key)
+        if bucket is None:
+            bucket = deque()
+            per_ip[client_key] = bucket
+        _prune_window(bucket, now - _LOGIN_WINDOW_SECONDS)
+        bucket.append(now)
+        _prune_window(global_q, now - _LOGIN_GLOBAL_WINDOW_SECONDS)
+        global_q.append(now)
+
+
+def _clear_login_failures(server: Any, client_key: str) -> None:
+    lock, per_ip, _ = _get_rate_limiter_state(server)
+    with lock:
+        per_ip.pop(client_key, None)
+
+
 def _compute_session_token(secret: bytes, password: str) -> str:
     return hmac.new(secret, b"museum-session-v1:" + password.encode("utf-8"), hashlib.sha256).hexdigest()
 
@@ -497,13 +567,22 @@ class MuseumHandler(http.server.SimpleHTTPRequestHandler):
                 pass
         return False
 
-    def _send_auth_required(self, error_msg: str = "", head_only: bool = False) -> None:
+    def _send_auth_required(
+        self,
+        error_msg: str = "",
+        head_only: bool = False,
+        status_code: int = 401,
+        retry_after: Optional[int] = None,
+    ) -> None:
         parsed = urllib.parse.urlparse(self.path)
         if parsed.path.startswith("/api/"):
-            body = json.dumps({"error": "Authentication required"}).encode("utf-8")
-            self.send_response(401)
+            body = json.dumps({"error": error_msg or "Authentication required"}).encode("utf-8")
+            self.send_response(status_code)
             self.send_header("Content-Type", "application/json")
-            self.send_header("WWW-Authenticate", 'Basic realm="Offline Museum Viewer"')
+            if status_code == 401:
+                self.send_header("WWW-Authenticate", 'Basic realm="Offline Museum Viewer"')
+            if retry_after is not None:
+                self.send_header("Retry-After", str(retry_after))
             self.send_header("Cache-Control", "no-store")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
@@ -513,10 +592,13 @@ class MuseumHandler(http.server.SimpleHTTPRequestHandler):
 
         next_path = _sanitize_next_path("/viewer/viewer.html" if parsed.path in ("/__museum_login", "/__museum_logout") else self.path)
         body = _render_login_html(next_path, error_msg=error_msg)
-        self.send_response(401)
+        self.send_response(status_code)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'")
-        self.send_header("WWW-Authenticate", 'Basic realm="Offline Museum Viewer"')
+        if status_code == 401:
+            self.send_header("WWW-Authenticate", 'Basic realm="Offline Museum Viewer"')
+        if retry_after is not None:
+            self.send_header("Retry-After", str(retry_after))
         self.send_header("Cache-Control", "no-store")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
@@ -703,6 +785,11 @@ class MuseumHandler(http.server.SimpleHTTPRequestHandler):
         if not self._is_authenticated():
             self._send_auth_required(head_only=False)
             return
+        if parsed.path in ("/", ""):
+            self.send_response(302)
+            self.send_header("Location", "/viewer/viewer.html")
+            self.end_headers()
+            return
         if parsed.path == "/__museum_login":
             self.send_response(303)
             self.send_header("Location", "/viewer/viewer.html")
@@ -756,13 +843,36 @@ class MuseumHandler(http.server.SimpleHTTPRequestHandler):
             supplied = (form.get("password") or [""])[0]
             next_path = _sanitize_next_path((form.get("next") or [next_path])[0])
 
+        client_key = _get_login_client_key(self)
+        if _is_login_rate_limited(self.server, client_key):
+            limit_msg = "Too many failed login attempts. Try again in 60 seconds."
+            if is_json:
+                body = json.dumps({"ok": False, "error": limit_msg}).encode("utf-8")
+                self.send_response(429)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Retry-After", str(int(_LOGIN_WINDOW_SECONDS)))
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+            else:
+                self._send_auth_required(
+                    error_msg=limit_msg,
+                    status_code=429,
+                    retry_after=int(_LOGIN_WINDOW_SECONDS),
+                )
+            return
+
         pwd = _get_auth_password(self.server)
         if pwd and not hmac.compare_digest(supplied, pwd):
+            _record_login_failure(self.server, client_key)
             if is_json:
                 self._send_json(401, {"ok": False, "error": "Invalid password"})
             else:
                 self._send_auth_required(error_msg="Incorrect museum password. Please try again.")
             return
+
+        _clear_login_failures(self.server, client_key)
 
         cookie_header = None
         if pwd:

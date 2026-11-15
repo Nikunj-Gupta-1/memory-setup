@@ -691,6 +691,10 @@
               <span class="share-pill-label">Tailscale VPN</span>
               <span id="tailscaleBadge" class="badge-warn">CHECKING</span>
             </div>
+            <div class="share-pill-item">
+              <span class="share-pill-label">Cloudflare Tunnel</span>
+              <span id="cloudflareBadge" class="badge-warn">CHECKING</span>
+            </div>
           </div>
         </div>
 
@@ -746,6 +750,15 @@
               <button id="btnOpenTailscale" class="share-btn-ghost" type="button" onclick="openTailscaleApp()">🛡️ Open Tailscale App</button>
             </div>
 
+            <div class="share-btn-row" style="margin-top:10px;padding-top:10px;border-top:1px solid rgba(148,163,184,0.2)">
+              <button id="btnInstallCloudflared" class="share-btn-ghost" type="button" onclick="installCloudflaredTool()" style="display:none">⬇️ Install Cloudflare Tunnel</button>
+              <button id="btnStartTunnel" class="share-btn-primary" type="button" onclick="startCloudflareTunnel()">☁️ Start Public Cloudflare Link</button>
+              <button id="btnStopTunnel" class="share-btn-ghost" type="button" onclick="stopCloudflareTunnel()">⏹️ Stop Cloudflare Tunnel</button>
+            </div>
+            <p class="share-help" id="shareTunnelDetail" style="margin-top:8px">
+              Public Cloudflare Quick Tunnel gives family a temporary HTTPS URL with zero router setup or Terminal commands — protected by your Museum Password above + automatic brute-force rate limiting.
+            </p>
+
             <div class="share-urls-box">
               <div class="share-url-item">
                 <label for="shareUrlTailscale">Tailscale Private IP Link (Best for Family Anywhere)</label>
@@ -764,6 +777,14 @@
               </div>
 
               <div class="share-url-item">
+                <label for="shareUrlCloudflare">Public Cloudflare Tunnel HTTPS Link (Works Anywhere — Password Required)</label>
+                <div class="share-input-row">
+                  <input id="shareUrlCloudflare" class="share-input share-url-input" type="text" readonly placeholder="Click Start Public Cloudflare Link to generate an HTTPS link..." />
+                  <button class="share-btn-ghost" type="button" onclick="copyShareUrl('shareUrlCloudflare')">Copy</button>
+                </div>
+              </div>
+
+              <div class="share-url-item">
                 <label for="shareUrlLan">Home Wi-Fi Link (Same Local Network Only)</label>
                 <div class="share-input-row">
                   <input id="shareUrlLan" class="share-input share-url-input" type="text" readonly placeholder="Start Remote Museum Server to populate..." />
@@ -776,31 +797,24 @@
 
         <div class="share-card share-guide-card">
           <div class="share-card-head">
-            <h3>Complete Tailscale Setup Guide (For You &amp; Any Future User)</h3>
-            <span class="share-step-tag">Encrypted WireGuard VPN + Zero Port Forwarding</span>
+            <h3>Two Zero-Terminal Ways to Share Your Museum Remotely</h3>
+            <span class="share-step-tag">Option A: Private Tailscale VPN &middot; Option B: Public Cloudflare HTTPS Link</span>
           </div>
           <p class="share-help">
-            Tailscale builds an encrypted private network directly between this computer and only the phones/laptops you approve — without opening router ports or uploading photos to the cloud. Paired with the Museum Password Lock, unauthorized devices cannot even reach the login page, and authorized devices still load zero photos or code until the password is submitted.
+            Both options keep the Control Center strictly private on this computer (<code>127.0.0.1</code>), serve the Museum read-only, enforce your Museum Password Lock before any catalog scripts or media load, and automatically log out remote phones/browsers the moment you click Stop.
           </p>
           <ol class="guide-steps">
             <li>
-              <strong>Install &amp; Connect Tailscale on This Computer:</strong>
-              Download Tailscale for macOS or Windows from <code>tailscale.com/download</code>, open the app (or click <strong>🛡️ Open Tailscale App</strong> above), sign in, and turn the switch to <strong>Connected</strong>. Wait a few seconds and click <strong>🔄 Refresh Status</strong> — your <code>100.x.y.z</code> Tailscale IP fills in automatically.
+              <strong>Option A — Tailscale Private VPN (Most Private, Permanent URL):</strong>
+              Install Tailscale from <code>tailscale.com/download</code>, click <strong>🛡️ Open Tailscale App</strong> above to connect, set a password in Step 1, and click <strong>🚀 Start Remote Museum Server</strong>. Only devices you approve on your tailnet (via Machine Share or your own account) can reach the <strong>Tailscale Private IP Link</strong>.
             </li>
             <li>
-              <strong>Set a Strong Museum Password &amp; Start Sharing:</strong>
-              In Step 1 above, enter a password and click <strong>💾 Save Password &amp; Port</strong>. Then click <strong>🚀 Start Remote Museum Server</strong>. The server binds read-only museum files on port <code>8888</code> (the Control Center itself stays private on <code>127.0.0.1</code> and is never exposed remotely).
+              <strong>Option B — 1-Click Cloudflare Public HTTPS Link (Zero Family App Installs):</strong>
+              Set a strong password in Step 1, then click <strong>☁️ Start Public Cloudflare Link</strong> above (if prompted, click <strong>⬇️ Install Cloudflare Tunnel</strong> once and the app installs <code>cloudflared</code> automatically). In a few seconds, a random HTTPS <code>*.trycloudflare.com</code> link appears with brute-force login protection (blocks after 5 wrong guesses for 60 seconds).
             </li>
             <li>
-              <strong>Connect Family Devices (Pick Method A or Method B):</strong>
-              <ul class="guide-sublist">
-                <li><strong>Method A — Machine Share (Best for Extended Family):</strong> Each family member installs the free <strong>Tailscale</strong> app (iPhone, iPad, Android, Mac, Windows) using their own account. In your Tailscale Admin Console (<code>login.tailscale.com/admin/machines</code>), open <code>···</code> on this computer → <strong>Share…</strong> → invite their email. They only get access to this machine, nothing else.</li>
-                <li><strong>Method B — Same Tailscale Account (Quickest for Household):</strong> Sign into Tailscale on your own phone, tablet, or TV browser with your same Tailscale account. Those devices immediately reach the private URL over cellular or away-from-home Wi-Fi.</li>
-              </ul>
-            </li>
-            <li>
-              <strong>Open Safely &amp; Lock When Done:</strong>
-              Send family the copied <strong>Tailscale Private IP Link</strong> and share the password separately. While locked, their browser receives zero catalog scripts, zero thumbnails, and zero videos until they submit the password. On shared devices, clicking <strong>🔒 Lock</strong> at the top-right of the Museum clears the session immediately.
+              <strong>Share Password Separately &amp; Stop When Done:</strong>
+              Send family the copied link (Tailscale or Cloudflare) and share the password separately. Stopping either the tunnel or the Remote Museum Server immediately cuts off external access and triggers automatic remote logout on connected viewers.
             </li>
           </ol>
         </div>

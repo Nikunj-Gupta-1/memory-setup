@@ -349,3 +349,54 @@ def check_tailscale_status() -> Dict[str, Any]:
         else:
             info["message"] = "Tailscale installed (unable to query status)"
     return info
+
+
+def find_cloudflared_binary() -> Optional[str]:
+    """Locate the `cloudflared` CLI binary across PATH and common macOS/Windows/local install paths."""
+    home = Path.home()
+    local_bin = home / ".memory_setup" / "bin" / ("cloudflared.exe" if platform.system() == "Windows" else "cloudflared")
+    candidates = [
+        shutil.which("cloudflared"),
+        str(local_bin),
+        "/opt/homebrew/bin/cloudflared",
+        "/usr/local/bin/cloudflared",
+        r"C:\Program Files\cloudflared\cloudflared.exe",
+        r"C:\Program Files (x86)\cloudflared\cloudflared.exe",
+        r"C:\ProgramData\chocolatey\bin\cloudflared.exe",
+        str(home / "scoop" / "shims" / "cloudflared.exe"),
+    ]
+    for cand in candidates:
+        if cand and Path(cand).is_file():
+            return str(cand)
+    return None
+
+
+def check_cloudflared_status() -> Dict[str, Any]:
+    """Inspect whether `cloudflared` is installed for 1-click public HTTPS sharing."""
+    bin_path = find_cloudflared_binary()
+    info: Dict[str, Any] = {
+        "installed": bin_path is not None,
+        "binary_path": bin_path,
+        "version": None,
+        "message": (
+            "cloudflared not installed yet — click 'Install Cloudflared' for 1-click setup."
+            if bin_path is None
+            else "cloudflared ready for 1-click public HTTPS links."
+        ),
+    }
+    if not bin_path:
+        return info
+
+    try:
+        proc = subprocess.run(
+            [bin_path, "--version"],
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+        ver_raw = ((proc.stdout or "") or (proc.stderr or "")).strip().splitlines()
+        if ver_raw:
+            info["version"] = ver_raw[0].strip()
+    except Exception:
+        pass
+    return info

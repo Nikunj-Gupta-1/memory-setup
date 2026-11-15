@@ -539,6 +539,8 @@ function renderShareStatus(s) {
   if (tsUrlEl) tsUrlEl.value = urls.tailscale || '';
   const tsDnsEl = document.getElementById('shareUrlTailscaleDns');
   if (tsDnsEl) tsDnsEl.value = urls.tailscale_dns || '';
+  const cfUrlEl = document.getElementById('shareUrlCloudflare');
+  if (cfUrlEl) cfUrlEl.value = urls.cloudflare || '';
   const lanUrlEl = document.getElementById('shareUrlLan');
   if (lanUrlEl) lanUrlEl.value = urls.lan || '';
 
@@ -546,6 +548,59 @@ function renderShareStatus(s) {
   const stopBtn = document.getElementById('btnStopShare');
   if (startBtn) startBtn.disabled = Boolean(s.running);
   if (stopBtn) stopBtn.disabled = !s.running;
+
+  const cf = s.cloudflare || {};
+  const cfInstall = s.cloudflare_install || {};
+  const cfBadge = document.getElementById('cloudflareBadge');
+  if (cfBadge) {
+    if (cf.running && cf.public_url) {
+      cfBadge.className = 'badge-ok';
+      cfBadge.innerText = 'PUBLIC LIVE';
+    } else if (cf.starting) {
+      cfBadge.className = 'badge-warn';
+      cfBadge.innerText = 'STARTING...';
+    } else if (cfInstall.running) {
+      cfBadge.className = 'badge-warn';
+      cfBadge.innerText = 'INSTALLING...';
+    } else if (cf.installed) {
+      cfBadge.className = 'badge-warn';
+      cfBadge.innerText = 'READY';
+    } else {
+      cfBadge.className = 'badge-err';
+      cfBadge.innerText = 'NOT INSTALLED';
+    }
+  }
+
+  const cfDetail = document.getElementById('shareTunnelDetail');
+  if (cfDetail) {
+    if (cfInstall.running) {
+      cfDetail.innerText = cfInstall.message || 'Downloading cloudflared binary...';
+    } else if (cfInstall.error) {
+      cfDetail.innerText = `Cloudflare install error: ${cfInstall.error}`;
+    } else if (cf.error) {
+      cfDetail.innerText = `Cloudflare Tunnel error: ${cf.error}`;
+    } else if (cf.running && cf.public_url) {
+      cfDetail.innerText = `Cloudflare HTTPS Quick Tunnel is LIVE -> forwarding to 127.0.0.1:${cf.local_port || s.port} (password-locked).`;
+    } else if (cf.starting) {
+      cfDetail.innerText = 'Starting Cloudflare Quick Tunnel and waiting for HTTPS trycloudflare.com URL...';
+    } else {
+      cfDetail.innerText = cf.message || 'Public Cloudflare Quick Tunnel gives family a temporary HTTPS URL with zero router setup or Terminal commands.';
+    }
+  }
+
+  const btnInstallCf = document.getElementById('btnInstallCloudflared');
+  const btnStartTunnel = document.getElementById('btnStartTunnel');
+  const btnStopTunnel = document.getElementById('btnStopTunnel');
+  if (btnInstallCf) {
+    btnInstallCf.style.display = cf.installed ? 'none' : 'inline-flex';
+    btnInstallCf.disabled = Boolean(cfInstall.running);
+  }
+  if (btnStartTunnel) {
+    btnStartTunnel.disabled = Boolean(!cf.installed || cf.running || cfInstall.running);
+  }
+  if (btnStopTunnel) {
+    btnStopTunnel.disabled = Boolean(!cf.running);
+  }
 }
 
 async function refreshShareStatus() {
@@ -676,6 +731,68 @@ async function openTailscaleApp() {
   [1500, 4000, 8000].forEach(delay => {
     setTimeout(() => { refreshShareStatus(); }, delay);
   });
+}
+
+async function installCloudflaredTool() {
+  const res = await fetch('/api/share/tunnel/install', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({})
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    setShareFeedback(data.error || 'Could not start cloudflared install.', true);
+    return;
+  }
+  renderShareStatus(data.share);
+  setShareFeedback('Downloading cloudflared into ~/.memory_setup/bin ... this usually finishes in a few seconds.');
+  [1500, 3500, 6500, 10000].forEach(delay => {
+    setTimeout(() => { refreshShareStatus(); }, delay);
+  });
+}
+
+async function startCloudflareTunnel() {
+  const archivePath = (document.getElementById('archivePath')?.value || '').trim();
+  if (!archivePath) {
+    setShareFeedback('Select an Archive Folder first.', true);
+    return;
+  }
+  const passwordRaw = document.getElementById('sharePasswordInput')?.value || '';
+  const portRaw = (document.getElementById('sharePortInput')?.value || '').trim();
+  const payload = { archive_path: archivePath };
+  if (passwordRaw) payload.password = passwordRaw;
+  if (portRaw) payload.port = Number(portRaw);
+
+  const res = await fetch('/api/share/tunnel/start', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    setShareFeedback(data.error || 'Failed to start Cloudflare Tunnel.', true);
+    return;
+  }
+  if (document.getElementById('sharePasswordInput')) {
+    document.getElementById('sharePasswordInput').value = '';
+  }
+  renderShareStatus(data.share);
+  setShareFeedback('Starting Cloudflare Quick Tunnel... your HTTPS trycloudflare.com link will appear in a few seconds.');
+  [1000, 2200, 3800, 6000].forEach(delay => {
+    setTimeout(() => { refreshShareStatus(); }, delay);
+  });
+}
+
+async function stopCloudflareTunnel() {
+  const archivePath = (document.getElementById('archivePath')?.value || '').trim();
+  const res = await fetch('/api/share/tunnel/stop', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ archive_path: archivePath || null })
+  });
+  const data = await res.json();
+  renderShareStatus(data.share);
+  setShareFeedback('Cloudflare Public Tunnel stopped. Remote server remains accessible over local Wi-Fi / Tailscale until stopped.');
 }
 
 async function copyShareUrl(inputId) {

@@ -5,6 +5,7 @@ import json
 import mimetypes
 import os
 import platform
+import re
 import secrets
 import shutil
 import socketserver
@@ -20,15 +21,18 @@ from typing import Any, Dict, Optional, Tuple
 from memory_setup.config import ArchiveContext, MIN_FREE_DISK_GB, OLLAMA_DEFAULT_MODEL
 from memory_setup.pipeline_runner import PipelineManager, get_archive_metrics
 from memory_setup.setup.checker import (
+    check_cloudflared_status,
     check_disk_space,
     check_tailscale_status,
     estimate_directory_bytes,
+    find_cloudflared_binary,
     get_lan_ip,
     run_diagnostics,
 )
 from memory_setup.setup.installer import (
     build_biometrics_install_command,
     ensure_ollama_running,
+    install_cloudflared,
     pull_ollama_model,
 )
 from memory_setup.viewer.builder import (
@@ -355,10 +359,148 @@ class MuseumShareManager:
         }
 
 
+_TRYCLOUDFLARE_URL_RE = re.compile(r"https://[a-z0-9-]+\.trycloudflare\.com", re.IGNORECASE)
+
+
+class CloudflareTunnelManager:
+    """Manage a temporary Cloudflare Quick Tunnel exposing the password-gated museum viewer."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._proc: Optional[subprocess.Popen[str]] = None
+        self._reader_thread: Optional[threading.Thread] = None
+        self._local_port: Optional[int] = None
+        self._public_base_url: Optional[str] = None
+        self._error: Optional[str] = None
+        self._starting = False
+        self._stopped_by_user = False
+
+    def _consume_output(self, proc: subprocess.Popen[str]) -> None:
+        last_line = ""
+        try:
+            stdout = proc.stdout
+            if stdout is not None:
+                for raw_line in iter(stdout.readline, ""):
+                    line = raw_line.strip()
+                    if not line:
+                        continue
+                    last_line = line
+                    match = _TRYCLOUDFLARE_URL_RE.search(line)
+                    if match:
+                        with self._lock:
+                            if self._proc is proc:
+                                self._public_base_url = match.group(0).rstrip("/")
+                                self._starting = False
+                                self._error = None
+        except Exception as exc:
+            last_line = str(exc)
+
+        rc = proc.wait()
+        with self._lock:
+            if self._proc is proc:
+                stopped_by_user = self._stopped_by_user
+                had_url = bool(self._public_base_url)
+                self._proc = None
+                self._public_base_url = None
+                self._local_port = None
+                self._starting = False
+                if not stopped_by_user and (rc != 0 or not had_url):
+                    self._error = last_line or f"cloudflared exited with code {rc}"
+
+    def start(self, local_port: int) -> Dict[str, Any]:
+        binary = find_cloudflared_binary()
+        if not binary:
+            raise ValueError(
+                "cloudflared is not installed yet. Click 'Install Cloudflare Tunnel' first."
+            )
+        target_port = int(local_port)
+        self.stop()
+
+        proc = subprocess.Popen(
+            [
+                binary,
+                "tunnel",
+                "--url",
+                f"http://127.0.0.1:{target_port}",
+                "--no-autoupdate",
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        )
+        reader = threading.Thread(
+            target=self._consume_output,
+            args=(proc,),
+            daemon=True,
+            name="CloudflareTunnelReader",
+        )
+        with self._lock:
+            self._proc = proc
+            self._reader_thread = reader
+            self._local_port = target_port
+            self._public_base_url = None
+            self._error = None
+            self._starting = True
+            self._stopped_by_user = False
+        reader.start()
+        return self.status()
+
+    def stop(self) -> None:
+        with self._lock:
+            self._stopped_by_user = True
+            proc = self._proc
+            self._proc = None
+            self._reader_thread = None
+            self._local_port = None
+            self._public_base_url = None
+            self._starting = False
+            self._error = None
+        if proc is not None and proc.poll() is None:
+            try:
+                proc.terminate()
+                proc.wait(timeout=2.0)
+            except Exception:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+
+    def status(self) -> Dict[str, Any]:
+        cf_info = check_cloudflared_status()
+        with self._lock:
+            proc = self._proc
+            active = proc is not None and proc.poll() is None
+            if not active and proc is not None:
+                self._proc = None
+                self._starting = False
+            base_url = self._public_base_url if active else None
+            starting = bool(active and self._starting and not base_url)
+            local_port = self._local_port if active else None
+            err = self._error
+        return {
+            **cf_info,
+            "running": active,
+            "starting": starting,
+            "local_port": local_port,
+            "public_base_url": base_url,
+            "public_url": f"{base_url}/viewer/viewer.html" if base_url else None,
+            "error": err,
+        }
+
+
 class AppState:
     def __init__(self, default_archive: Optional[Path] = None) -> None:
         self.manager = PipelineManager()
         self.share_manager = MuseumShareManager()
+        self.tunnel_manager = CloudflareTunnelManager()
+        self.tunnel_install_status: Dict[str, Any] = {
+            "running": False,
+            "status": "idle",
+            "message": "",
+            "error": None,
+        }
+        self._tunnel_install_lock = threading.Lock()
         self.selected_archive: Optional[Path] = (
             Path(default_archive).expanduser().resolve() if default_archive else None
         )
@@ -366,6 +508,60 @@ class AppState:
             self.manager.active_ctx = ArchiveContext(self.selected_archive)
         self.pull_status: Dict[str, Any] = {"running": False, "status": "idle"}
         self.bio_install_status: Dict[str, Any] = {"running": False, "status": "idle"}
+
+    def share_snapshot(self, archive_root: Optional[Path] = None) -> Dict[str, Any]:
+        info = self.share_manager.status(archive_root)
+        cf = self.tunnel_manager.status()
+        with self._tunnel_install_lock:
+            install_info = dict(self.tunnel_install_status)
+        urls = dict(info.get("urls") or {})
+        urls["cloudflare"] = cf.get("public_url")
+        info["urls"] = urls
+        info["cloudflare"] = cf
+        info["cloudflare_install"] = install_info
+        return info
+
+    def start_cloudflared_install(self) -> Dict[str, Any]:
+        with self._tunnel_install_lock:
+            if self.tunnel_install_status.get("running"):
+                return dict(self.tunnel_install_status)
+            self.tunnel_install_status = {
+                "running": True,
+                "status": "installing",
+                "message": "Installing cloudflared binary...",
+                "error": None,
+            }
+
+        def _worker() -> None:
+            try:
+                res = install_cloudflared()
+                with self._tunnel_install_lock:
+                    if res.get("ok"):
+                        self.tunnel_install_status = {
+                            "running": False,
+                            "status": "installed",
+                            "message": res.get("message") or "cloudflared installed.",
+                            "error": None,
+                        }
+                    else:
+                        self.tunnel_install_status = {
+                            "running": False,
+                            "status": "error",
+                            "message": res.get("message") or "Failed to install cloudflared.",
+                            "error": res.get("message") or "Installation failed",
+                        }
+            except Exception as exc:
+                with self._tunnel_install_lock:
+                    self.tunnel_install_status = {
+                        "running": False,
+                        "status": "error",
+                        "message": str(exc),
+                        "error": str(exc),
+                    }
+
+        threading.Thread(target=_worker, daemon=True, name="CloudflaredInstaller").start()
+        with self._tunnel_install_lock:
+            return dict(self.tunnel_install_status)
 
     def snapshot(self) -> Dict[str, Any]:
         status = self.manager.get_status()
@@ -564,7 +760,7 @@ def create_app_server(
                 raw_path = (qs.get("archive_path") or [None])[0]
                 ctx = self._resolve_archive_context(raw_path)
                 arch_root = ctx.archive_root if ctx is not None else state.selected_archive
-                self._send_json(200, state.share_manager.status(arch_root))
+                self._send_json(200, state.share_snapshot(arch_root))
                 return
 
             if path == "/api/people/clusters":
@@ -843,13 +1039,16 @@ def create_app_server(
                         return
                 pwd_arg = body["password"] if "password" in body else None
                 try:
-                    info = state.share_manager.save_config(
+                    state.share_manager.save_config(
                         ctx.archive_root, password=pwd_arg, port=port_val
                     )
                 except ValueError as exc:
                     self._send_json(400, {"error": str(exc)})
                     return
-                self._send_json(200, {"ok": True, "share": info})
+                if pwd_arg is not None and not str(pwd_arg).strip():
+                    state.tunnel_manager.stop()
+                    state.share_manager.stop()
+                self._send_json(200, {"ok": True, "share": state.share_snapshot(ctx.archive_root)})
                 return
 
             if path == "/api/share/start":
@@ -868,7 +1067,7 @@ def create_app_server(
                 bind_host = str(body.get("bind_host") or "0.0.0.0").strip() or "0.0.0.0"
                 pwd_arg = body["password"] if "password" in body else None
                 try:
-                    info = state.share_manager.start(
+                    state.share_manager.start(
                         ctx.archive_root,
                         bind_host=bind_host,
                         port=port_val,
@@ -877,14 +1076,61 @@ def create_app_server(
                 except ValueError as exc:
                     self._send_json(400, {"error": str(exc)})
                     return
-                self._send_json(200, {"ok": True, "share": info})
+                self._send_json(200, {"ok": True, "share": state.share_snapshot(ctx.archive_root)})
                 return
 
             if path == "/api/share/stop":
                 ctx = self._resolve_archive_context(body.get("archive_path"))
+                state.tunnel_manager.stop()
                 state.share_manager.stop()
                 arch_root = ctx.archive_root if ctx is not None else state.selected_archive
-                self._send_json(200, {"ok": True, "share": state.share_manager.status(arch_root)})
+                self._send_json(200, {"ok": True, "share": state.share_snapshot(arch_root)})
+                return
+
+            if path == "/api/share/tunnel/install":
+                install_state = state.start_cloudflared_install()
+                arch_root = state.selected_archive
+                self._send_json(
+                    200,
+                    {"ok": True, "install": install_state, "share": state.share_snapshot(arch_root)},
+                )
+                return
+
+            if path == "/api/share/tunnel/start":
+                ctx = self._resolve_archive_context(body.get("archive_path"))
+                if ctx is None:
+                    self._send_json(400, {"error": "Select an archive folder first."})
+                    return
+                raw_port = body.get("port")
+                port_val = None
+                if raw_port not in (None, ""):
+                    try:
+                        port_val = int(raw_port)
+                    except (TypeError, ValueError):
+                        self._send_json(400, {"error": "Share port must be a valid integer."})
+                        return
+                pwd_arg = body["password"] if "password" in body else None
+                try:
+                    share_status = state.share_manager.status(ctx.archive_root)
+                    if not share_status.get("running"):
+                        share_status = state.share_manager.start(
+                            ctx.archive_root,
+                            bind_host=str(body.get("bind_host") or "0.0.0.0").strip() or "0.0.0.0",
+                            port=port_val,
+                            password=pwd_arg,
+                        )
+                    state.tunnel_manager.start(int(share_status["port"]))
+                except ValueError as exc:
+                    self._send_json(400, {"error": str(exc)})
+                    return
+                self._send_json(200, {"ok": True, "share": state.share_snapshot(ctx.archive_root)})
+                return
+
+            if path == "/api/share/tunnel/stop":
+                ctx = self._resolve_archive_context(body.get("archive_path"))
+                state.tunnel_manager.stop()
+                arch_root = ctx.archive_root if ctx is not None else state.selected_archive
+                self._send_json(200, {"ok": True, "share": state.share_snapshot(arch_root)})
                 return
 
             if path == "/api/share/tailscale-open":
@@ -944,6 +1190,7 @@ def _shutdown_control_center(
         return
     server._did_shutdown = True
     server.shutdown_event.set()
+    server.app_state.tunnel_manager.stop()
     server.app_state.share_manager.stop()
     manager = server.app_state.manager
     if manager.get_status().get("running"):

@@ -439,6 +439,102 @@ def test_control_center_remote_share_ui_and_lifecycle(tmp_path: Path) -> None:
             assert exc.code == 303
             assert exc.headers.get("Location") == "/archive/viewer/viewer.html"
     finally:
+        server.app_state.tunnel_manager.stop()
+        server.app_state.share_manager.stop()
+        server.shutdown()
+        server.server_close()
+
+
+def test_gui_cloudflare_tunnel_start_and_stop(tmp_path: Path) -> None:
+    import io
+
+    src = tmp_path / "src"
+    arch = tmp_path / "archive"
+    src.mkdir()
+    Image.new("RGB", (60, 60), color=(30, 120, 210)).save(src / "img.jpg")
+    ctx = ArchiveContext(arch, source_dirs=[src], mode="safe_copy")
+    run_stage1_consolidation(ctx)
+    run_stage2_standardization(ctx)
+    run_stage5_museum(ctx, overwrite_html=True)
+
+    server = create_app_server(default_archive=arch, host="127.0.0.1", port=0)
+    port = server.server_address[1]
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+
+    terminated = {"flag": False}
+
+    class _FakeProc:
+        def __init__(self) -> None:
+            self.stdout = io.StringIO(
+                "2026-11-15T14:00:00Z INF +------------------------------------------------------------+\n"
+                "2026-11-15T14:00:00Z INF |  Your quick Tunnel has been created! Visit it at:          |\n"
+                "2026-11-15T14:00:00Z INF |  https://family-archive-demo.trycloudflare.com            |\n"
+            )
+            self._rc = None
+
+        def poll(self):
+            return self._rc
+
+        def wait(self, timeout=None):
+            if terminated["flag"]:
+                self._rc = 0
+                return 0
+            time.sleep(0.25)
+            self._rc = 0
+            return 0
+
+        def terminate(self):
+            terminated["flag"] = True
+            self._rc = 0
+
+        def kill(self):
+            terminated["flag"] = True
+            self._rc = -9
+
+    try:
+        base = f"http://127.0.0.1:{port}"
+        with urllib.request.urlopen(f"{base}/", timeout=5) as resp:
+            html = resp.read().decode("utf-8", errors="ignore")
+            assert "cloudflareBadge" in html
+            assert "shareUrlCloudflare" in html
+            assert "btnStartTunnel" in html
+        with urllib.request.urlopen(f"{base}/app.js", timeout=5) as resp:
+            js = resp.read().decode("utf-8", errors="ignore")
+            assert "startCloudflareTunnel" in js
+            assert "installCloudflaredTool" in js
+
+        with (
+            patch("memory_setup.gui.app.find_cloudflared_binary", return_value="/opt/homebrew/bin/cloudflared"),
+            patch("memory_setup.gui.app.check_cloudflared_status", return_value={"installed": True, "binary_path": "/opt/homebrew/bin/cloudflared", "version": "2025.2.0", "message": "Installed"}),
+            patch("memory_setup.gui.app.subprocess.Popen", return_value=_FakeProc()),
+        ):
+            res = _post_json(
+                f"{base}/api/share/tunnel/start",
+                {"archive_path": str(arch), "port": 0, "password": "tunnel-secret"},
+            )
+            assert res["ok"] is True
+            assert res["share"]["running"] is True
+
+            # Wait briefly for reader thread to extract trycloudflare.com URL
+            cf_url = None
+            for _ in range(20):
+                with urllib.request.urlopen(f"{base}/api/share/status?archive_path={arch}", timeout=5) as resp:
+                    st = json.loads(resp.read().decode("utf-8"))
+                cf_url = st.get("urls", {}).get("cloudflare")
+                if cf_url:
+                    break
+                time.sleep(0.03)
+            assert cf_url == "https://family-archive-demo.trycloudflare.com/viewer/viewer.html"
+
+            # Stopping Remote Server also stops the active Cloudflare tunnel
+            stopped = _post_json(f"{base}/api/share/stop", {"archive_path": str(arch)})
+            assert stopped["ok"] is True
+            assert stopped["share"]["running"] is False
+            assert stopped["share"]["cloudflare"]["running"] is False
+            assert stopped["share"]["urls"]["cloudflare"] is None
+    finally:
+        server.app_state.tunnel_manager.stop()
         server.app_state.share_manager.stop()
         server.shutdown()
         server.server_close()

@@ -114,3 +114,55 @@ def test_check_tailscale_status_interface_ip_fallback() -> None:
     assert info["connected"] is True
     assert info["tailscale_ip"] == "100.101.22.33"
     assert info["ipv4"] == "100.101.22.33"
+
+
+def test_cloudflared_status_and_installer(tmp_path: Path) -> None:
+    import io
+    import tarfile
+    from memory_setup.setup.checker import check_cloudflared_status, find_cloudflared_binary
+    from memory_setup.setup.installer import install_cloudflared
+
+    fake_bin = tmp_path / "cloudflared-mock"
+    fake_bin.write_text("#!/bin/sh\necho ok\n", encoding="utf-8")
+    with patch("memory_setup.setup.checker.shutil.which", return_value=str(fake_bin)):
+        fake_ver = MagicMock(stdout="cloudflared version 2025.2.0 (built 2025-02-01)", stderr="", returncode=0)
+        with patch("memory_setup.setup.checker.subprocess.run", return_value=fake_ver):
+            status = check_cloudflared_status()
+            assert find_cloudflared_binary() == str(fake_bin)
+    assert status["installed"] is True
+    assert status["binary_path"] == str(fake_bin)
+    assert "2025.2.0" in str(status["version"])
+
+    # Mock downloading a Darwin .tgz release into an isolated dest_dir
+    tar_buf = io.BytesIO()
+    with tarfile.open(fileobj=tar_buf, mode="w:gz") as tf:
+        payload = b"#!/bin/sh\necho cloudflared\n"
+        ti = tarfile.TarInfo("cloudflared")
+        ti.size = len(payload)
+        tf.addfile(ti, io.BytesIO(payload))
+    tar_bytes = tar_buf.getvalue()
+
+    class _FakeResp:
+        def __init__(self, data: bytes) -> None:
+            self._data = data
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            return False
+        def raise_for_status(self) -> None:
+            return None
+        def iter_content(self, chunk_size: int = 65536):
+            yield self._data
+
+    dest = tmp_path / "cf-bin"
+    with (
+        patch("memory_setup.setup.installer.find_cloudflared_binary", return_value=None),
+        patch("memory_setup.setup.installer._cloudflared_release_url", return_value=("https://example.test/cf.tgz", True)),
+        patch("memory_setup.setup.installer.requests.get", return_value=_FakeResp(tar_bytes)),
+        patch("memory_setup.setup.installer.platform.system", return_value="Darwin"),
+    ):
+        res = install_cloudflared(dest_dir=dest)
+    assert res["ok"] is True, res
+    installed_bin = Path(res["binary_path"])
+    assert installed_bin.exists()
+    assert installed_bin.read_bytes().startswith(b"#!/bin/sh")

@@ -432,3 +432,93 @@ def test_museum_server_loads_password_from_share_config(tmp_path: Path) -> None:
     finally:
         httpd.shutdown()
         httpd.server_close()
+
+
+def test_museum_server_root_redirect_and_login_rate_limit(tmp_path: Path) -> None:
+    import http.cookiejar
+
+    ctx = _build_archive_with_videos(tmp_path)
+    run_stage5_museum(ctx, overwrite_html=True)
+    (ctx.viewer_dir / "share_config.json").write_text(
+        json.dumps({"password": "right-password", "port": 8888}),
+        encoding="utf-8",
+    )
+
+    import importlib.util
+
+    server_py = ctx.viewer_dir / "server.py"
+    spec = importlib.util.spec_from_file_location("standalone_museum_server_rl", server_py)
+    assert spec and spec.loader
+    standalone_server = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(standalone_server)
+
+    httpd = socketserver.ThreadingTCPServer(("127.0.0.1", 0), standalone_server.MuseumHandler)
+    httpd.root_dir = ctx.archive_root  # type: ignore[attr-defined]
+    httpd.db_path = ctx.db_path  # type: ignore[attr-defined]
+    port = httpd.server_address[1]
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    try:
+        base = f"http://127.0.0.1:{port}"
+        # 5 wrong attempts with X-Forwarded-For IP trigger HTTP 429 on attempt #6
+        for _ in range(5):
+            req = urllib.request.Request(
+                f"{base}/__museum_login",
+                data=json.dumps({"password": "wrong"}).encode("utf-8"),
+                headers={
+                    "Content-Type": "application/json",
+                    "X-Forwarded-For": "198.51.100.42",
+                },
+                method="POST",
+            )
+            try:
+                urllib.request.urlopen(req, timeout=5)
+                assert False, "Expected 401 on wrong password"
+            except urllib.error.HTTPError as exc:
+                assert exc.code == 401
+
+        blocked_req = urllib.request.Request(
+            f"{base}/__museum_login",
+            data=json.dumps({"password": "right-password"}).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "X-Forwarded-For": "198.51.100.42",
+            },
+            method="POST",
+        )
+        try:
+            urllib.request.urlopen(blocked_req, timeout=5)
+            assert False, "Expected 429 after 5 failed attempts"
+        except urllib.error.HTTPError as exc:
+            assert exc.code == 429
+            assert exc.headers.get("Retry-After") == "60"
+
+        # Different client IP can still log in and hitting "/" redirects 302 -> /viewer/viewer.html
+        jar = http.cookiejar.CookieJar()
+
+        class _NoRedir(urllib.request.HTTPRedirectHandler):
+            def redirect_request(self, req, fp, code, msg, headers, newurl):
+                return None
+
+        opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar), _NoRedir())
+        ok_login = urllib.request.Request(
+            f"{base}/__museum_login",
+            data=json.dumps({"password": "right-password"}).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "X-Forwarded-For": "198.51.100.99",
+            },
+            method="POST",
+        )
+        with opener.open(ok_login, timeout=5) as resp:
+            assert resp.status == 200
+
+        try:
+            opener.open(f"{base}/", timeout=5)
+            assert False, "Expected 302 redirect on authenticated /"
+        except urllib.error.HTTPError as exc:
+            assert exc.code == 302
+            assert exc.headers.get("Location") == "/viewer/viewer.html"
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
