@@ -265,11 +265,26 @@ def _refresh_catalog_data_js(root_dir: Optional[Path] = None, db_path: Optional[
         fp.write(f"const EXTENDED_CLUSTERS = {json.dumps(extended_clusters)};\n")
 
 
+def _load_share_config(root_dir: Path) -> Dict[str, Any]:
+    cfg_path = root_dir.resolve() / "viewer" / "share_config.json"
+    if not cfg_path.is_file():
+        return {}
+    try:
+        data = json.loads(cfg_path.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
 def _get_auth_password(server: Any) -> str:
     explicit = getattr(server, "museum_password", None)
     if explicit is not None:
         return str(explicit)
-    return str(os.environ.get("MUSEUM_PASSWORD", "") or "")
+    env_pwd = str(os.environ.get("MUSEUM_PASSWORD", "") or "")
+    if env_pwd:
+        return env_pwd
+    root = Path(getattr(server, "root_dir", ROOT_DIR)).resolve()
+    return str(_load_share_config(root).get("password") or "")
 
 
 def _get_session_secret(server: Any) -> bytes:
@@ -484,16 +499,24 @@ class MuseumHandler(http.server.SimpleHTTPRequestHandler):
                 self.wfile.write(body)
             return
 
-        next_path = _sanitize_next_path("/viewer/viewer.html" if parsed.path == "/__museum_login" else self.path)
+        next_path = _sanitize_next_path("/viewer/viewer.html" if parsed.path in ("/__museum_login", "/__museum_logout") else self.path)
         body = _render_login_html(next_path, error_msg=error_msg)
         self.send_response(401)
         self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'")
         self.send_header("WWW-Authenticate", 'Basic realm="Offline Museum Viewer"')
         self.send_header("Cache-Control", "no-store")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         if not head_only:
             self.wfile.write(body)
+
+    def _handle_logout(self) -> None:
+        self.send_response(303)
+        self.send_header("Set-Cookie", "museum_session=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Location", "/viewer/viewer.html")
+        self.end_headers()
 
     def _serve_file(self, file_path: Path, head_only: bool = False) -> None:
         if not file_path.exists() or not file_path.is_file():
@@ -556,7 +579,8 @@ class MuseumHandler(http.server.SimpleHTTPRequestHandler):
             return None
         name_low = target.name.lower()
         if (
-            target.suffix.lower() in {".sqlite", ".db", ".sqlite-wal", ".sqlite-shm"}
+            name_low == "share_config.json"
+            or target.suffix.lower() in {".sqlite", ".db", ".sqlite-wal", ".sqlite-shm"}
             or name_low.endswith(".sqlite")
             or name_low.endswith(".sqlite-wal")
             or name_low.endswith(".sqlite-shm")
@@ -588,10 +612,13 @@ class MuseumHandler(http.server.SimpleHTTPRequestHandler):
         self._serve_file(target, head_only=True)
 
     def do_GET(self) -> None:
+        parsed = urllib.parse.urlparse(self.path)
+        if parsed.path == "/__museum_logout":
+            self._handle_logout()
+            return
         if not self._is_authenticated():
             self._send_auth_required(head_only=False)
             return
-        parsed = urllib.parse.urlparse(self.path)
         if parsed.path == "/__museum_login":
             self.send_response(303)
             self.send_header("Location", "/viewer/viewer.html")
@@ -680,6 +707,9 @@ class MuseumHandler(http.server.SimpleHTTPRequestHandler):
         parsed = urllib.parse.urlparse(self.path)
         if parsed.path == "/__museum_login":
             self._handle_login_post()
+            return
+        if parsed.path == "/__museum_logout":
+            self._handle_logout()
             return
 
         if not self._is_authenticated():
@@ -855,11 +885,15 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    saved_cfg = _load_share_config(ROOT_DIR)
+    requested_port = args.port if args.port is not None else (int(saved_cfg["port"]) if saved_cfg.get("port") else None)
+    resolved_password = str(args.password or saved_cfg.get("password") or "")
+
     os.chdir(ROOT_DIR)
     socketserver.ThreadingTCPServer.allow_reuse_address = True
     httpd = None
-    port = args.port or 8080
-    candidates = [args.port] if args.port else list(range(8080, 8095))
+    port = requested_port or 8080
+    candidates = [requested_port] if requested_port else list(range(8080, 8095))
     for p in candidates:
         try:
             httpd = socketserver.ThreadingTCPServer((args.host, p), MuseumHandler)
@@ -871,7 +905,7 @@ def main() -> None:
     if httpd is None:
         raise RuntimeError(f"Could not bind port(s): {candidates}")
 
-    httpd.museum_password = args.password or ""  # type: ignore[attr-defined]
+    httpd.museum_password = resolved_password  # type: ignore[attr-defined]
     httpd.museum_read_only = bool(args.read_only)  # type: ignore[attr-defined]
     httpd.museum_session_secret = secrets.token_bytes(32)  # type: ignore[attr-defined]
 

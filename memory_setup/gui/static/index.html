@@ -77,6 +77,14 @@
               <span class="nav-desc">Disk, Ollama, ArcFace &amp; EXIF</span>
             </span>
           </button>
+
+          <button id="nav-share" class="nav-item" type="button" onclick="switchStudioTab('share')">
+            <span class="nav-icon">🌐</span>
+            <span class="nav-text">
+              <span class="nav-title">Remote Family Share</span>
+              <span class="nav-desc">Password lock, Tailscale &amp; links</span>
+            </span>
+          </button>
         </div>
 
         <div class="nav-group">
@@ -655,6 +663,146 @@
               <div class="diag-explain">Uses ExifTool &amp; macOS <code>sips</code> / <code>pillow-heif</code> for iPhone HEIC decoding and rich camera EXIF parsing.</div>
             </div>
           </div>
+        </div>
+      </section>
+
+      <!-- TAB 6: REMOTE FAMILY SHARE & TAILSCALE GUIDE -->
+      <section id="sec-share" class="studio-section" data-tab="share">
+        <div class="share-hero-card">
+          <div>
+            <span class="share-eyebrow">VIEWER-ONLY REMOTE ACCESS</span>
+            <h2 class="share-hero-title">Remote Family Share &amp; Password Lock</h2>
+            <p class="share-hero-sub">
+              Share <strong>only</strong> the read-only Memory Museum viewer (<code>viewer.html</code>) over
+              Tailscale VPN or home Wi-Fi with zero terminal commands. The Control Center stays local on
+              <code>127.0.0.1</code>, and zero HTML, catalog scripts, thumbnails, photos, or videos load until the password is entered.
+            </p>
+          </div>
+          <div class="share-status-pills">
+            <div class="share-pill-item">
+              <span class="share-pill-label">Share Server</span>
+              <span id="shareServerBadge" class="badge-warn">STOPPED</span>
+            </div>
+            <div class="share-pill-item">
+              <span class="share-pill-label">Museum Password</span>
+              <span id="sharePasswordBadge" class="badge-warn">NOT SET</span>
+            </div>
+            <div class="share-pill-item">
+              <span class="share-pill-label">Tailscale VPN</span>
+              <span id="tailscaleBadge" class="badge-warn">CHECKING</span>
+            </div>
+          </div>
+        </div>
+
+        <div id="shareFeedback" class="modal-feedback share-feedback" style="display:none;"></div>
+
+        <div class="share-grid">
+          <div class="share-card">
+            <div class="share-card-head">
+              <h3>1. Password Lock &amp; Port Setup</h3>
+              <span class="share-step-tag">Required Before Sharing</span>
+            </div>
+            <p class="share-help">
+              Unauthenticated visitors receive only a strict locked login screen
+              (<code>401</code> + <code>Content-Security-Policy: default-src 'none'</code>). Nothing in
+              <code>viewer.html</code>, <code>catalog_data.js</code>, or media folders is fetched or exposed before
+              authentication. Anyone can also click <strong>🔒 Lock</strong> inside the Museum Viewer at any time.
+            </p>
+
+            <div class="share-field">
+              <label for="sharePasswordInput">Museum Access Password</label>
+              <div class="share-input-row">
+                <input id="sharePasswordInput" class="share-input" type="password" autocomplete="new-password" placeholder="Set or update family museum password..." />
+                <button id="btnToggleSharePwd" class="share-btn-ghost" type="button" onclick="toggleSharePasswordVisibility()">Show</button>
+              </div>
+              <small id="sharePasswordHint" class="share-hint">Stored locally in archive/viewer/share_config.json (ignored by Git and blocked from HTTP downloads).</small>
+            </div>
+
+            <div class="share-field">
+              <label for="sharePortInput">Museum Share Port</label>
+              <input id="sharePortInput" class="share-input share-input-sm" type="number" min="1024" max="65535" value="8888" />
+              <small class="share-hint">Default is <code>8888</code>. Remote links connect only to this read-only Museum server port.</small>
+            </div>
+
+            <div class="share-btn-row">
+              <button id="btnSaveSharePassword" class="share-btn-primary" type="button" onclick="saveShareConfig()">💾 Save Password &amp; Port</button>
+              <button id="btnClearSharePassword" class="share-btn-danger" type="button" onclick="clearSharePassword()">🗑 Clear Password</button>
+            </div>
+          </div>
+
+          <div class="share-card">
+            <div class="share-card-head">
+              <h3>2. Remote Server &amp; Shareable Links</h3>
+              <span id="shareActiveModeTag" class="share-step-tag">Read-Only Mode</span>
+            </div>
+            <p id="shareTailscaleDetail" class="share-help">
+              Checking local Tailscale and home Wi-Fi network addresses...
+            </p>
+
+            <div class="share-btn-row">
+              <button id="btnStartShare" class="share-btn-primary" type="button" onclick="startShareServer()">🚀 Start Remote Museum Server</button>
+              <button id="btnStopShare" class="share-btn-ghost" type="button" onclick="stopShareServer()">🛑 Stop Remote Server</button>
+              <button id="btnRefreshShare" class="share-btn-ghost" type="button" onclick="refreshShareStatus()">🔄 Refresh Status</button>
+              <button id="btnOpenTailscale" class="share-btn-ghost" type="button" onclick="openTailscaleApp()">🛡️ Open Tailscale App</button>
+            </div>
+
+            <div class="share-urls-box">
+              <div class="share-url-item">
+                <label for="shareUrlTailscale">Tailscale Private IP Link (Best for Family Anywhere)</label>
+                <div class="share-input-row">
+                  <input id="shareUrlTailscale" class="share-input share-url-input" type="text" readonly placeholder="Connect Tailscale and start server to generate link..." />
+                  <button class="share-btn-ghost" type="button" onclick="copyShareUrl('shareUrlTailscale')">Copy</button>
+                </div>
+              </div>
+
+              <div class="share-url-item">
+                <label for="shareUrlTailscaleDns">Tailscale MagicDNS Link</label>
+                <div class="share-input-row">
+                  <input id="shareUrlTailscaleDns" class="share-input share-url-input" type="text" readonly placeholder="Available when Tailscale MagicDNS is connected..." />
+                  <button class="share-btn-ghost" type="button" onclick="copyShareUrl('shareUrlTailscaleDns')">Copy</button>
+                </div>
+              </div>
+
+              <div class="share-url-item">
+                <label for="shareUrlLan">Home Wi-Fi Link (Same Local Network Only)</label>
+                <div class="share-input-row">
+                  <input id="shareUrlLan" class="share-input share-url-input" type="text" readonly placeholder="Start Remote Museum Server to populate..." />
+                  <button class="share-btn-ghost" type="button" onclick="copyShareUrl('shareUrlLan')">Copy</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="share-card share-guide-card">
+          <div class="share-card-head">
+            <h3>Complete Tailscale Setup Guide (For You &amp; Any Future User)</h3>
+            <span class="share-step-tag">Encrypted WireGuard VPN + Zero Port Forwarding</span>
+          </div>
+          <p class="share-help">
+            Tailscale builds an encrypted private network directly between this computer and only the phones/laptops you approve — without opening router ports or uploading photos to the cloud. Paired with the Museum Password Lock, unauthorized devices cannot even reach the login page, and authorized devices still load zero photos or code until the password is submitted.
+          </p>
+          <ol class="guide-steps">
+            <li>
+              <strong>Install &amp; Connect Tailscale on This Computer:</strong>
+              Download Tailscale for macOS or Windows from <code>tailscale.com/download</code>, open the app (or click <strong>🛡️ Open Tailscale App</strong> above), sign in, and turn the switch to <strong>Connected</strong>. Wait a few seconds and click <strong>🔄 Refresh Status</strong> — your <code>100.x.y.z</code> Tailscale IP fills in automatically.
+            </li>
+            <li>
+              <strong>Set a Strong Museum Password &amp; Start Sharing:</strong>
+              In Step 1 above, enter a password and click <strong>💾 Save Password &amp; Port</strong>. Then click <strong>🚀 Start Remote Museum Server</strong>. The server binds read-only museum files on port <code>8888</code> (the Control Center itself stays private on <code>127.0.0.1</code> and is never exposed remotely).
+            </li>
+            <li>
+              <strong>Connect Family Devices (Pick Method A or Method B):</strong>
+              <ul class="guide-sublist">
+                <li><strong>Method A — Machine Share (Best for Extended Family):</strong> Each family member installs the free <strong>Tailscale</strong> app (iPhone, iPad, Android, Mac, Windows) using their own account. In your Tailscale Admin Console (<code>login.tailscale.com/admin/machines</code>), open <code>···</code> on this computer → <strong>Share…</strong> → invite their email. They only get access to this machine, nothing else.</li>
+                <li><strong>Method B — Same Tailscale Account (Quickest for Household):</strong> Sign into Tailscale on your own phone, tablet, or TV browser with your same Tailscale account. Those devices immediately reach the private URL over cellular or away-from-home Wi-Fi.</li>
+              </ul>
+            </li>
+            <li>
+              <strong>Open Safely &amp; Lock When Done:</strong>
+              Send family the copied <strong>Tailscale Private IP Link</strong> and share the password separately. While locked, their browser receives zero catalog scripts, zero thumbnails, and zero videos until they submit the password. On shared devices, clicking <strong>🔒 Lock</strong> at the top-right of the Museum clears the session immediately.
+            </li>
+          </ol>
         </div>
       </section>
     </main>

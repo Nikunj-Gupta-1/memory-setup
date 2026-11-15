@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import json
 import os
 import platform
 import shutil
+import socket
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -200,3 +203,78 @@ def _can_import(module_name: str) -> bool:
         return True
     except Exception:
         return False
+
+
+def get_lan_ip() -> Optional[str]:
+    """Return the local LAN IPv4 address for home Wi-Fi sharing without sending traffic."""
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        sock.connect(("8.8.8.8", 80))
+        ip = sock.getsockname()[0]
+        if ip and not ip.startswith("127."):
+            return ip
+    except OSError:
+        pass
+    finally:
+        sock.close()
+    return None
+
+
+def _find_tailscale_binary() -> Optional[str]:
+    candidates = [
+        shutil.which("tailscale"),
+        "/Applications/Tailscale.app/Contents/MacOS/Tailscale",
+        "/opt/homebrew/bin/tailscale",
+        "/usr/local/bin/tailscale",
+        r"C:\Program Files\Tailscale\tailscale.exe",
+    ]
+    for cand in candidates:
+        if cand and Path(cand).exists():
+            return str(cand)
+    return None
+
+
+def check_tailscale_status() -> Dict[str, Any]:
+    """Inspect local Tailscale installation, tunnel state, Tailscale IP, and MagicDNS name."""
+    bin_path = _find_tailscale_binary()
+    info: Dict[str, Any] = {
+        "installed": bin_path is not None,
+        "binary_path": bin_path,
+        "backend_state": "NotInstalled" if bin_path is None else "Unknown",
+        "running": False,
+        "ipv4": None,
+        "dns_name": None,
+        "hostname": None,
+        "error": None,
+    }
+    if not bin_path:
+        return info
+
+    try:
+        proc = subprocess.run(
+            [bin_path, "status", "--json"],
+            capture_output=True,
+            text=True,
+            timeout=3,
+        )
+        raw = (proc.stdout or "").strip()
+        if not raw:
+            info["backend_state"] = "Stopped"
+            return info
+        data = json.loads(raw)
+        state = str(data.get("BackendState") or "Stopped")
+        info["backend_state"] = state
+        info["running"] = state.lower() == "running"
+        ips = data.get("TailscaleIPs") or []
+        for ip in ips:
+            if "." in str(ip):
+                info["ipv4"] = str(ip)
+                break
+        self_info = data.get("Self") or {}
+        if self_info.get("DNSName"):
+            info["dns_name"] = str(self_info["DNSName"]).rstrip(".")
+        if self_info.get("HostName"):
+            info["hostname"] = str(self_info["HostName"])
+    except Exception as exc:
+        info["error"] = str(exc)
+    return info

@@ -38,6 +38,7 @@ reports/
 _dedupe/
 catalog.json
 catalog_data.js
+share_config.json
 ai_manifest.csv
 ai_manifest.json
 bin_detect_faces

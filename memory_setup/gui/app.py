@@ -5,6 +5,8 @@ import json
 import mimetypes
 import os
 import platform
+import secrets
+import shutil
 import socketserver
 import subprocess
 import sys
@@ -17,7 +19,13 @@ from typing import Any, Dict, Optional, Tuple
 
 from memory_setup.config import ArchiveContext, MIN_FREE_DISK_GB, OLLAMA_DEFAULT_MODEL
 from memory_setup.pipeline_runner import PipelineManager, get_archive_metrics
-from memory_setup.setup.checker import check_disk_space, estimate_directory_bytes, run_diagnostics
+from memory_setup.setup.checker import (
+    check_disk_space,
+    check_tailscale_status,
+    estimate_directory_bytes,
+    get_lan_ip,
+    run_diagnostics,
+)
 from memory_setup.setup.installer import (
     build_biometrics_install_command,
     ensure_ollama_running,
@@ -30,6 +38,7 @@ from memory_setup.viewer.builder import (
     rename_person_clusters,
     run_stage5_museum,
 )
+from memory_setup.viewer.template.server import MuseumHandler
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
@@ -163,9 +172,184 @@ def browse_native_folder() -> Optional[str]:
         return None
 
 
+class _SharedMuseumHTTPServer(socketserver.ThreadingTCPServer):
+    """Read-only password-protected museum server bound separately for family sharing."""
+
+    allow_reuse_address = True
+    daemon_threads = True
+    block_on_close = False
+
+
+class MuseumShareManager:
+    """Manage password configuration and optional background Museum Viewer sharing."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._httpd: Optional[_SharedMuseumHTTPServer] = None
+        self._thread: Optional[threading.Thread] = None
+        self._archive_root: Optional[Path] = None
+        self._port: int = 8080
+
+    @staticmethod
+    def config_path(archive_root: Path) -> Path:
+        return (Path(archive_root).expanduser().resolve() / "viewer" / "share_config.json").resolve()
+
+    def read_config(self, archive_root: Optional[Path]) -> Dict[str, Any]:
+        if archive_root is None:
+            return {"password": "", "port": 8080}
+        cfg_file = self.config_path(archive_root)
+        if not cfg_file.is_file():
+            return {"password": "", "port": 8080}
+        try:
+            data = json.loads(cfg_file.read_text(encoding="utf-8"))
+            if not isinstance(data, dict):
+                return {"password": "", "port": 8080}
+            return {
+                "password": str(data.get("password") or ""),
+                "port": int(data.get("port") or 8080),
+            }
+        except Exception:
+            return {"password": "", "port": 8080}
+
+    def save_config(
+        self,
+        archive_root: Path,
+        password: Optional[str] = None,
+        port: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        arch_resolved = Path(archive_root).expanduser().resolve()
+        cfg_file = self.config_path(arch_resolved)
+        cfg_file.parent.mkdir(parents=True, exist_ok=True)
+        current = self.read_config(arch_resolved)
+
+        if password is not None:
+            current["password"] = str(password)
+        if port is not None:
+            port_val = int(port)
+            if port_val != 0 and not (1024 <= port_val <= 65535):
+                raise ValueError("Port must be between 1024 and 65535.")
+            current["port"] = port_val or 8080
+
+        cfg_file.write_text(json.dumps(current, indent=2), encoding="utf-8")
+        try:
+            os.chmod(cfg_file, 0o600)
+        except OSError:
+            pass
+
+        should_stop = False
+        with self._lock:
+            if self._httpd is not None and self._archive_root == arch_resolved:
+                if current["password"]:
+                    self._httpd.museum_password = current["password"]  # type: ignore[attr-defined]
+                    self._httpd.museum_session_secret = secrets.token_bytes(32)  # type: ignore[attr-defined]
+                else:
+                    should_stop = True
+
+        if should_stop:
+            self.stop()
+        return {"has_password": bool(current["password"]), "port": current["port"]}
+
+    def start(
+        self,
+        archive_root: Path,
+        bind_host: str = "0.0.0.0",
+        port: Optional[int] = None,
+        password: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        arch_resolved = Path(archive_root).expanduser().resolve()
+        viewer_dir = arch_resolved / "viewer"
+        if not viewer_dir.exists() or not (viewer_dir / "viewer.html").exists():
+            raise ValueError("Museum Viewer has not been built for this folder yet. Run Stage 5 / Build Museum first.")
+
+        if password is not None:
+            self.save_config(arch_resolved, password=password, port=port)
+        elif port is not None:
+            self.save_config(arch_resolved, port=port)
+
+        cfg = self.read_config(arch_resolved)
+        active_pwd = str(cfg.get("password") or "")
+        if not active_pwd:
+            raise ValueError("A Museum Password is required before starting remote sharing.")
+
+        target_port = int(port) if port is not None else int(cfg.get("port") or 8080)
+        self.stop()
+
+        httpd = _SharedMuseumHTTPServer((bind_host, target_port), MuseumHandler)
+        httpd.root_dir = arch_resolved  # type: ignore[attr-defined]
+        httpd.db_path = (viewer_dir / "catalog.sqlite").resolve()  # type: ignore[attr-defined]
+        httpd.museum_password = active_pwd  # type: ignore[attr-defined]
+        httpd.museum_read_only = True  # type: ignore[attr-defined]
+        httpd.museum_session_secret = secrets.token_bytes(32)  # type: ignore[attr-defined]
+
+        actual_port = int(httpd.server_address[1])
+        thread = threading.Thread(
+            target=httpd.serve_forever,
+            kwargs={"poll_interval": 0.2},
+            daemon=True,
+        )
+        with self._lock:
+            self._httpd = httpd
+            self._thread = thread
+            self._archive_root = arch_resolved
+            self._port = actual_port
+        thread.start()
+        return self.status(arch_resolved)
+
+    def stop(self) -> None:
+        with self._lock:
+            httpd = self._httpd
+            thread = self._thread
+            self._httpd = None
+            self._thread = None
+            self._archive_root = None
+        if httpd is not None:
+            try:
+                httpd.shutdown()
+            except Exception:
+                pass
+            try:
+                httpd.server_close()
+            except Exception:
+                pass
+        if thread is not None and thread.is_alive():
+            thread.join(timeout=1.0)
+
+    def status(self, archive_root: Optional[Path] = None) -> Dict[str, Any]:
+        with self._lock:
+            running = self._httpd is not None
+            serving_root = self._archive_root
+            serving_port = self._port
+
+        target_root = Path(archive_root).expanduser().resolve() if archive_root else serving_root
+        cfg = self.read_config(target_root)
+        active_port = serving_port if running else int(cfg.get("port") or 8080)
+
+        ts = check_tailscale_status()
+        lan_ip = get_lan_ip()
+        ts_ipv4 = ts.get("ipv4")
+        ts_dns = ts.get("dns_name")
+
+        return {
+            "running": running,
+            "serving_archive": str(serving_root) if serving_root else "",
+            "port": active_port,
+            "has_password": bool(cfg.get("password")),
+            "read_only": True,
+            "tailscale": ts,
+            "lan_ip": lan_ip,
+            "urls": {
+                "tailscale": f"http://{ts_ipv4}:{active_port}/viewer/viewer.html" if ts_ipv4 else None,
+                "tailscale_dns": f"http://{ts_dns}:{active_port}/viewer/viewer.html" if ts_dns else None,
+                "lan": f"http://{lan_ip}:{active_port}/viewer/viewer.html" if lan_ip else None,
+                "local": f"http://127.0.0.1:{active_port}/viewer/viewer.html",
+            },
+        }
+
+
 class AppState:
     def __init__(self, default_archive: Optional[Path] = None) -> None:
         self.manager = PipelineManager()
+        self.share_manager = MuseumShareManager()
         self.selected_archive: Optional[Path] = (
             Path(default_archive).expanduser().resolve() if default_archive else None
         )
@@ -319,8 +503,23 @@ def create_app_server(
             parsed = urllib.parse.urlparse(self.path)
             path = parsed.path
 
+            if path == "/__museum_logout":
+                self.send_response(303)
+                self.send_header("Set-Cookie", "museum_session=; Path=/; Max-Age=0; SameSite=Lax; HttpOnly")
+                self.send_header("Location", "/archive/viewer/viewer.html")
+                self.end_headers()
+                return
+
             if path == "/api/status":
                 self._send_json(200, state.snapshot())
+                return
+
+            if path == "/api/share/status":
+                qs = urllib.parse.parse_qs(parsed.query)
+                raw_path = (qs.get("archive_path") or [None])[0]
+                ctx = self._resolve_archive_context(raw_path)
+                arch_root = ctx.archive_root if ctx is not None else state.selected_archive
+                self._send_json(200, state.share_manager.status(arch_root))
                 return
 
             if path == "/api/people/clusters":
@@ -584,6 +783,95 @@ def create_app_server(
                 self._send_json(200, {"ok": True, "opened": target.name})
                 return
 
+            if path == "/api/share/config":
+                ctx = self._resolve_archive_context(body.get("archive_path"))
+                if ctx is None:
+                    self._send_json(400, {"error": "Select an archive folder first."})
+                    return
+                raw_port = body.get("port")
+                port_val: Optional[int] = None
+                if raw_port not in (None, ""):
+                    try:
+                        port_val = int(raw_port)
+                    except (TypeError, ValueError):
+                        self._send_json(400, {"error": "Share port must be a valid integer."})
+                        return
+                pwd_arg = body["password"] if "password" in body else None
+                try:
+                    info = state.share_manager.save_config(
+                        ctx.archive_root, password=pwd_arg, port=port_val
+                    )
+                except ValueError as exc:
+                    self._send_json(400, {"error": str(exc)})
+                    return
+                self._send_json(200, {"ok": True, "share": info})
+                return
+
+            if path == "/api/share/start":
+                ctx = self._resolve_archive_context(body.get("archive_path"))
+                if ctx is None:
+                    self._send_json(400, {"error": "Select an archive folder first."})
+                    return
+                raw_port = body.get("port")
+                port_val = None
+                if raw_port not in (None, ""):
+                    try:
+                        port_val = int(raw_port)
+                    except (TypeError, ValueError):
+                        self._send_json(400, {"error": "Share port must be a valid integer."})
+                        return
+                bind_host = str(body.get("bind_host") or "0.0.0.0").strip() or "0.0.0.0"
+                pwd_arg = body["password"] if "password" in body else None
+                try:
+                    info = state.share_manager.start(
+                        ctx.archive_root,
+                        bind_host=bind_host,
+                        port=port_val,
+                        password=pwd_arg,
+                    )
+                except ValueError as exc:
+                    self._send_json(400, {"error": str(exc)})
+                    return
+                self._send_json(200, {"ok": True, "share": info})
+                return
+
+            if path == "/api/share/stop":
+                ctx = self._resolve_archive_context(body.get("archive_path"))
+                state.share_manager.stop()
+                arch_root = ctx.archive_root if ctx is not None else state.selected_archive
+                self._send_json(200, {"ok": True, "share": state.share_manager.status(arch_root)})
+                return
+
+            if path == "/api/share/tailscale-open":
+                ts = check_tailscale_status()
+                sys_name = platform.system()
+                opened = False
+                msg = ""
+                if sys_name == "Darwin":
+                    app_bundle = Path("/Applications/Tailscale.app")
+                    if app_bundle.exists():
+                        subprocess.Popen(["open", "-a", str(app_bundle)])
+                        opened = True
+                        msg = "Opened Tailscale menu bar app. Toggle Connect or Sign In there if needed."
+                    else:
+                        msg = "Tailscale.app was not found in /Applications. Install Tailscale for macOS first."
+                elif sys_name == "Windows":
+                    gui_exe = Path(r"C:\Program Files\Tailscale\tailscale-ipn.exe")
+                    if gui_exe.exists():
+                        subprocess.Popen([str(gui_exe)])
+                        opened = True
+                        msg = "Opened Tailscale tray app."
+                    else:
+                        msg = "Tailscale Windows app was not found. Install Tailscale for Windows first."
+                else:
+                    msg = (
+                        "Tailscale binary detected; use your Tailscale desktop/tray app to connect."
+                        if ts.get("installed")
+                        else "Tailscale not found on this machine. Install it from tailscale.com/download."
+                    )
+                self._send_json(200, {"ok": opened, "opened": opened, "message": msg, "tailscale": ts})
+                return
+
             self._send_json(404, {"error": "Unknown API endpoint"})
 
     for candidate_port in range(port, port + 20):
@@ -611,6 +899,7 @@ def _shutdown_control_center(
         return
     server._did_shutdown = True
     server.shutdown_event.set()
+    server.app_state.share_manager.stop()
     manager = server.app_state.manager
     if manager.get_status().get("running"):
         manager.stop()

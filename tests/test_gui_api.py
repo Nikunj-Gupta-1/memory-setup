@@ -306,3 +306,116 @@ def test_pipeline_manager_targeted_stage_runs(tmp_path: Path) -> None:
         m_s1.assert_called_once()
         m_s2.assert_not_called()
         m_clust.assert_called_once()
+
+
+def test_control_center_remote_share_ui_and_lifecycle(tmp_path: Path) -> None:
+    import http.cookiejar
+
+    arch = tmp_path / "ShareArchive"
+    (arch / "raw").mkdir(parents=True)
+    img = Image.new("RGB", (100, 100), color=(90, 140, 200))
+    img.save(arch / "raw" / "family.jpg", format="JPEG")
+
+    ctx = ArchiveContext(archive_root=arch, mode="in_place", enable_biometrics=False, enable_vision=False)
+    run_stage1_consolidation(ctx)
+    run_stage2_standardization(ctx, max_workers=1)
+    run_stage3_validation(ctx, max_workers=1)
+    run_stage5_museum(ctx, overwrite_html=True)
+
+    server = create_app_server(default_archive=arch, host="127.0.0.1", port=0)
+    port = server.server_address[1]
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+
+    try:
+        base = f"http://127.0.0.1:{port}"
+        with urllib.request.urlopen(f"{base}/", timeout=5) as resp:
+            html = resp.read().decode("utf-8")
+            assert "nav-share" in html
+            assert "sec-share" in html
+            assert "Tailscale" in html
+            assert "sharePasswordInput" in html
+
+        with urllib.request.urlopen(f"{base}/app.js", timeout=5) as resp:
+            js = resp.read().decode("utf-8")
+            for fn in ("saveShareConfig", "startShareServer", "stopShareServer", "refreshShareStatus", "openTailscaleApp"):
+                assert fn in js
+
+        # Starting without a password must fail cleanly with 400
+        start_no_pwd = urllib.request.Request(
+            f"{base}/api/share/start",
+            data=json.dumps({"archive_path": str(arch), "port": 0}).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            urllib.request.urlopen(start_no_pwd, timeout=5)
+            assert False, "Expected 400 when starting share server without password"
+        except urllib.error.HTTPError as exc:
+            assert exc.code == 400
+
+        # Configure password from Control Center GUI API
+        cfg_res = _post_json(
+            f"{base}/api/share/config",
+            {"archive_path": str(arch), "password": "family-test-password", "port": 8889},
+        )
+        assert cfg_res["ok"] is True
+        assert cfg_res["share"]["has_password"] is True
+        assert (ctx.viewer_dir / "share_config.json").exists()
+
+        # Start read-only password-locked Museum Server on ephemeral port
+        start_res = _post_json(
+            f"{base}/api/share/start",
+            {"archive_path": str(arch), "bind_host": "127.0.0.1", "port": 0},
+        )
+        assert start_res["ok"] is True
+        assert start_res["share"]["running"] is True
+        share_port = int(start_res["share"]["port"])
+        assert share_port > 0
+
+        share_base = f"http://127.0.0.1:{share_port}"
+        try:
+            urllib.request.urlopen(f"{share_base}/viewer/viewer.html", timeout=5)
+            assert False, "Expected 401 before login"
+        except urllib.error.HTTPError as exc:
+            assert exc.code == 401
+            assert "default-src 'none'" in exc.headers.get("Content-Security-Policy", "")
+
+        jar = http.cookiejar.CookieJar()
+        opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
+        login_req = urllib.request.Request(
+            f"{share_base}/__museum_login",
+            data=json.dumps({"password": "family-test-password"}).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with opener.open(login_req, timeout=5) as resp:
+            assert resp.status == 200
+        with opener.open(f"{share_base}/viewer/viewer.html", timeout=5) as resp:
+            assert resp.status == 200
+            assert b"lockMuseumBtn" in resp.read()
+
+        # Stop Remote Museum Server via GUI API
+        stop_res = _post_json(
+            f"{base}/api/share/stop",
+            {"archive_path": str(arch)},
+        )
+        assert stop_res["ok"] is True
+        assert stop_res["share"]["running"] is False
+
+        # Control Center /__museum_logout route avoids 404 when previewed locally
+        class _NoRedirect(urllib.request.HTTPRedirectHandler):
+            def redirect_request(self, req, fp, code, msg, headers, newurl):
+                return None
+
+        no_redir = urllib.request.build_opener(_NoRedirect())
+        try:
+            no_redir.open(f"{base}/__museum_logout", timeout=5)
+            assert False, "Expected 303 redirect on local logout"
+        except urllib.error.HTTPError as exc:
+            assert exc.code == 303
+            assert exc.headers.get("Location") == "/archive/viewer/viewer.html"
+    finally:
+        server.app_state.share_manager.stop()
+        server.shutdown()
+        server.server_close()

@@ -12,6 +12,9 @@ function switchStudioTab(tabId) {
     const matches = sec.getAttribute('data-tab') === activeStudioTab;
     sec.classList.toggle('active', showAll || matches);
   });
+  if (activeStudioTab === 'share' && typeof refreshShareStatus === 'function') {
+    refreshShareStatus();
+  }
 }
 
 function setMode(mode) {
@@ -66,6 +69,9 @@ async function runPreflight() {
   renderDiagnostics(data);
   if (data.archive) {
     renderArchiveMetrics(data.archive);
+  }
+  if (typeof refreshShareStatus === 'function') {
+    await refreshShareStatus();
   }
 }
 
@@ -461,6 +467,229 @@ async function quarantineHomework() {
   if (data.ok) {
     document.getElementById('progressMsg').innerText = `Moved ${data.moved_count} flagged document(s) to content/documents/homework_archive/.`;
     await runPreflight();
+  }
+}
+
+function setShareFeedback(msg, isError = false) {
+  const el = document.getElementById('shareFeedback');
+  if (!el) return;
+  if (!msg) {
+    el.style.display = 'none';
+    el.innerText = '';
+    el.classList.remove('is-error');
+    return;
+  }
+  el.style.display = 'block';
+  el.innerText = msg;
+  el.classList.toggle('is-error', Boolean(isError));
+}
+
+function renderShareStatus(s) {
+  if (!s) return;
+  const serverBadge = document.getElementById('shareServerBadge');
+  if (serverBadge) {
+    serverBadge.className = s.running ? 'badge-ok' : 'badge-warn';
+    serverBadge.innerText = s.running ? `LIVE :${s.port}` : 'STOPPED';
+  }
+
+  const pwdBadge = document.getElementById('sharePasswordBadge');
+  if (pwdBadge) {
+    pwdBadge.className = s.has_password ? 'badge-ok' : 'badge-warn';
+    pwdBadge.innerText = s.has_password ? 'LOCKED (PASSWORD SET)' : 'NOT SET';
+  }
+
+  const ts = s.tailscale || {};
+  const tsBadge = document.getElementById('tailscaleBadge');
+  if (tsBadge) {
+    if (ts.connected) {
+      tsBadge.className = 'badge-ok';
+      tsBadge.innerText = 'CONNECTED';
+    } else if (ts.installed) {
+      tsBadge.className = 'badge-warn';
+      tsBadge.innerText = (ts.backend_state || 'DISCONNECTED').toUpperCase();
+    } else {
+      tsBadge.className = 'badge-err';
+      tsBadge.innerText = 'NOT INSTALLED';
+    }
+  }
+
+  const detail = document.getElementById('shareTailscaleDetail');
+  if (detail) {
+    const ipTxt = ts.tailscale_ip ? `Tailscale IP: ${ts.tailscale_ip}` : 'Tailscale IP unavailable until connected';
+    const lanTxt = s.lan_ip ? `Home Wi-Fi IP: ${s.lan_ip}` : 'Home Wi-Fi IP unavailable';
+    detail.innerText = `${ts.message || 'Tailscale checked.'} · ${ipTxt} · ${lanTxt}`;
+  }
+
+  const portInput = document.getElementById('sharePortInput');
+  if (portInput && document.activeElement !== portInput && s.port) {
+    portInput.value = s.port;
+  }
+
+  const pwdInput = document.getElementById('sharePasswordInput');
+  if (pwdInput) {
+    pwdInput.placeholder = s.has_password
+      ? 'Password is saved (type new password to change it)...'
+      : 'Set or update family museum password...';
+  }
+
+  const urls = s.urls || {};
+  const tsUrlEl = document.getElementById('shareUrlTailscale');
+  if (tsUrlEl) tsUrlEl.value = urls.tailscale || '';
+  const tsDnsEl = document.getElementById('shareUrlTailscaleDns');
+  if (tsDnsEl) tsDnsEl.value = urls.tailscale_dns || '';
+  const lanUrlEl = document.getElementById('shareUrlLan');
+  if (lanUrlEl) lanUrlEl.value = urls.lan || '';
+
+  const startBtn = document.getElementById('btnStartShare');
+  const stopBtn = document.getElementById('btnStopShare');
+  if (startBtn) startBtn.disabled = Boolean(s.running);
+  if (stopBtn) stopBtn.disabled = !s.running;
+}
+
+async function refreshShareStatus() {
+  const archivePath = (document.getElementById('archivePath')?.value || '').trim();
+  const qs = archivePath ? `?archive_path=${encodeURIComponent(archivePath)}` : '';
+  const res = await fetch(`/api/share/status${qs}`);
+  if (!res.ok) return;
+  const data = await res.json();
+  renderShareStatus(data);
+}
+
+function toggleSharePasswordVisibility() {
+  const inp = document.getElementById('sharePasswordInput');
+  const btn = document.getElementById('btnToggleSharePwd');
+  if (!inp || !btn) return;
+  const show = inp.type === 'password';
+  inp.type = show ? 'text' : 'password';
+  btn.innerText = show ? 'Hide' : 'Show';
+}
+
+async function saveShareConfig() {
+  const archivePath = (document.getElementById('archivePath')?.value || '').trim();
+  if (!archivePath) {
+    setShareFeedback('Select an Archive Folder at the top of Overview first.', true);
+    return;
+  }
+  const passwordRaw = document.getElementById('sharePasswordInput')?.value || '';
+  const portRaw = (document.getElementById('sharePortInput')?.value || '').trim();
+  const payload = { archive_path: archivePath };
+  if (passwordRaw) payload.password = passwordRaw;
+  if (portRaw) payload.port = Number(portRaw);
+
+  const res = await fetch('/api/share/config', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    setShareFeedback(data.error || 'Could not save share configuration.', true);
+    return;
+  }
+  if (document.getElementById('sharePasswordInput')) {
+    document.getElementById('sharePasswordInput').value = '';
+  }
+  renderShareStatus(data.share);
+  setShareFeedback(
+    passwordRaw
+      ? 'Saved new museum access password and port. Zero content loads for visitors until this password is entered.'
+      : 'Saved museum share port settings.'
+  );
+}
+
+async function clearSharePassword() {
+  const archivePath = (document.getElementById('archivePath')?.value || '').trim();
+  if (!archivePath) {
+    setShareFeedback('Select an Archive Folder first.', true);
+    return;
+  }
+  const res = await fetch('/api/share/config', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ archive_path: archivePath, password: '' })
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    setShareFeedback(data.error || 'Could not clear password.', true);
+    return;
+  }
+  if (document.getElementById('sharePasswordInput')) {
+    document.getElementById('sharePasswordInput').value = '';
+  }
+  renderShareStatus(data.share);
+  setShareFeedback('Cleared saved museum password. Set a new password before starting Remote Share.');
+}
+
+async function startShareServer() {
+  const archivePath = (document.getElementById('archivePath')?.value || '').trim();
+  if (!archivePath) {
+    setShareFeedback('Select an Archive Folder first.', true);
+    return;
+  }
+  const passwordRaw = document.getElementById('sharePasswordInput')?.value || '';
+  const portRaw = (document.getElementById('sharePortInput')?.value || '').trim();
+  const payload = { archive_path: archivePath };
+  if (passwordRaw) payload.password = passwordRaw;
+  if (portRaw) payload.port = Number(portRaw);
+
+  const res = await fetch('/api/share/start', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    setShareFeedback(data.error || 'Failed to start Remote Museum Server.', true);
+    return;
+  }
+  if (document.getElementById('sharePasswordInput')) {
+    document.getElementById('sharePasswordInput').value = '';
+  }
+  renderShareStatus(data.share);
+  const liveUrl = data.share?.urls?.tailscale || data.share?.urls?.lan || '';
+  setShareFeedback(`Remote Museum Server started in read-only password-locked mode${liveUrl ? ` (${liveUrl})` : ''}.`);
+}
+
+async function stopShareServer() {
+  const archivePath = (document.getElementById('archivePath')?.value || '').trim();
+  const res = await fetch('/api/share/stop', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ archive_path: archivePath || null })
+  });
+  const data = await res.json();
+  renderShareStatus(data.share);
+  setShareFeedback('Remote Museum Server stopped. Remote URLs are offline.');
+}
+
+async function openTailscaleApp() {
+  const res = await fetch('/api/share/tailscale-open', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({})
+  });
+  const data = await res.json();
+  setShareFeedback(data.message || 'Checked Tailscale app.', !data.opened && !data.tailscale?.installed);
+  await refreshShareStatus();
+}
+
+async function copyShareUrl(inputId) {
+  const el = document.getElementById(inputId);
+  const val = (el?.value || '').trim();
+  if (!val) {
+    setShareFeedback('No URL to copy yet — connect Tailscale and start the Remote Museum Server first.', true);
+    return;
+  }
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(val);
+    } else if (el) {
+      el.select();
+      document.execCommand('copy');
+    }
+    setShareFeedback(`Copied link to clipboard: ${val}`);
+  } catch (_) {
+    setShareFeedback(`Copy manually from the box: ${val}`);
   }
 }
 

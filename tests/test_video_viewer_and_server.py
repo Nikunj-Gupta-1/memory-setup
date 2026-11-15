@@ -254,13 +254,24 @@ def test_standalone_server_password_gate_search_and_readonly(tmp_path: Path) -> 
     try:
         base = f"http://127.0.0.1:{port}"
 
-        # Unauthenticated page and API requests must return 401
+        # Unauthenticated page and API requests must return 401 with strict zero-content CSP
         try:
             urllib.request.urlopen(f"{base}/viewer/viewer.html", timeout=5)
             assert False, "Expected 401 before login"
         except urllib.error.HTTPError as exc:
             assert exc.code == 401
-            assert b"/__museum_login" in exc.read()
+            csp = exc.headers.get("Content-Security-Policy", "")
+            assert "default-src 'none'" in csp
+            locked_body = exc.read()
+            assert b"/__museum_login" in locked_body
+            assert b"catalog_data.js" not in locked_body
+            assert b"ALL_PHOTOS" not in locked_body
+
+        try:
+            urllib.request.urlopen(f"{base}/viewer/catalog_data.js", timeout=5)
+            assert False, "Expected 401 for unauthenticated catalog_data.js"
+        except urllib.error.HTTPError as exc:
+            assert exc.code == 401
 
         try:
             urllib.request.urlopen(f"{base}/api/search?q=Family", timeout=5)
@@ -310,12 +321,13 @@ def test_standalone_server_password_gate_search_and_readonly(tmp_path: Path) -> 
             assert resp.status == 206
             assert resp.read() == b"RIFF"
 
-        # Raw SQLite file download is always blocked even when authenticated
-        try:
-            opener.open(f"{base}/viewer/catalog.sqlite", timeout=5)
-            assert False, "Expected 403 for direct sqlite download"
-        except urllib.error.HTTPError as exc:
-            assert exc.code == 403
+        # Raw SQLite file and share_config.json are always blocked even when authenticated
+        for forbidden_rel in ("/viewer/catalog.sqlite", "/viewer/share_config.json"):
+            try:
+                opener.open(f"{base}{forbidden_rel}", timeout=5)
+                assert False, f"Expected 403 for direct download of {forbidden_rel}"
+            except urllib.error.HTTPError as exc:
+                assert exc.code == 403
 
         # Read-only share mode rejects POST /api/open-media
         open_req = urllib.request.Request(
@@ -329,6 +341,70 @@ def test_standalone_server_password_gate_search_and_readonly(tmp_path: Path) -> 
             assert False, "Expected 403 in read-only share mode"
         except urllib.error.HTTPError as exc:
             assert exc.code == 403
+
+        # Clicking Lock triggers /__museum_logout which clears session and re-locks immediately
+        try:
+            opener.open(f"{base}/__museum_logout", timeout=5)
+            assert False, "Expected redirect back to locked 401 viewer"
+        except urllib.error.HTTPError as exc:
+            assert exc.code == 401
+
+        try:
+            opener.open(f"{base}/viewer/viewer.html", timeout=5)
+            assert False, "Expected viewer to remain locked after /__museum_logout"
+        except urllib.error.HTTPError as exc:
+            assert exc.code == 401
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+
+
+def test_museum_server_loads_password_from_share_config(tmp_path: Path) -> None:
+    import http.cookiejar
+
+    ctx = _build_archive_with_videos(tmp_path)
+    run_stage5_museum(ctx, overwrite_html=True)
+    (ctx.viewer_dir / "share_config.json").write_text(
+        json.dumps({"password": "config-file-password", "port": 8888}),
+        encoding="utf-8",
+    )
+
+    import importlib.util
+
+    server_py = ctx.viewer_dir / "server.py"
+    spec = importlib.util.spec_from_file_location("standalone_museum_server_cfg", server_py)
+    assert spec and spec.loader
+    standalone_server = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(standalone_server)
+
+    httpd = socketserver.ThreadingTCPServer(("127.0.0.1", 0), standalone_server.MuseumHandler)
+    httpd.root_dir = ctx.archive_root  # type: ignore[attr-defined]
+    httpd.db_path = ctx.db_path  # type: ignore[attr-defined]
+    port = httpd.server_address[1]
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    try:
+        base = f"http://127.0.0.1:{port}"
+        try:
+            urllib.request.urlopen(f"{base}/viewer/viewer.html", timeout=5)
+            assert False, "Expected 401 when share_config.json defines password"
+        except urllib.error.HTTPError as exc:
+            assert exc.code == 401
+
+        jar = http.cookiejar.CookieJar()
+        opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
+        login = urllib.request.Request(
+            f"{base}/__museum_login",
+            data=json.dumps({"password": "config-file-password"}).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with opener.open(login, timeout=5) as resp:
+            assert resp.status == 200
+        with opener.open(f"{base}/viewer/viewer.html", timeout=5) as resp:
+            html = resp.read().decode("utf-8", errors="ignore")
+            assert "lockMuseumBtn" in html
+            assert "/__museum_logout" in html
     finally:
         httpd.shutdown()
         httpd.server_close()

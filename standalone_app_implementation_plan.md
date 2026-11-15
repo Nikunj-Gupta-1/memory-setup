@@ -2,7 +2,7 @@
 
 **Target Repository**: `Memory_Setup/`  
 **Current Milestone**: Implemented Architecture & Reference Design  
-**Status**: Completed & Verified (`40/40` pytest checks passing)  
+**Status**: Completed & Verified (`42/42` pytest checks passing)  
 
 ---
 
@@ -352,7 +352,7 @@ Memory_Setup/
 | **Phase 3** | Metadata & Offline Geocoding | Fast EXIF/QuickTime parser, embedded KD-tree spatial geocoder (15k cities). | Resolves 1,000 GPS coordinates in $<0.1\text{s}$ with zero network requests. |
 | **Phase 4** | Biometrics & Vision AI Engine | InsightFace SCRFD + ArcFace 512-d pipeline, incremental Leader Centroid clustering (thresh=0.48), high-precision document classifier, memory-bounded single-worker Ollama client. | Accurately clusters family members across age gaps; preserves manual merges/names; 0 family photos misclassified as homework; RAM strictly bounded $<2.5$ GB. |
 | **Phase 5** | Museum Generator & Launcher Suite | Anti-clobber builder, FTS5 indexer, `catalog_data.js` (`ALL_PHOTOS` + `ALL_VIDEOS`), HTTP `206` Range `server.py`, `start_viewer.command` / `.bat`. | Museum opens in browser via launcher; photos, videos, map, search, and people tabs fully interactive. |
-| **Phase 6** | Desktop GUI & Launchers | Native desktop GUI window (`pywebview`), folder picker, live progress dashboard, speed mode selector, native macOS `Memory Setup.app` + Windows `.bat`/`.lnk` launchers. | Native desktop Control Center launches on macOS and Windows, processes folder end-to-end. |
+| **Phase 6** | Desktop GUI & Launchers | Native desktop GUI window (`pywebview`), folder picker, live progress dashboard, **Remote Family Share** tab (zero-terminal Tailscale + password lock `share_config.json` + **🔒 Lock** `/__museum_logout`), macOS `Memory Setup.app` + Windows `.lnk` launchers with `--rebuild-app`. | Native desktop Control Center launches cleanly, processes archives incrementally, and serves password-locked remote viewer safely. |
 
 ---
 
@@ -372,6 +372,8 @@ cd Memory_Setup
 - `test_document_classifier.py`: Validates document precision against known adversarial cases (birthday cakes, t-shirts with text, people on benches, versus real math worksheets).
 - `test_memory_bounded_client.py`: Verifies that `LLAMA_ARG_CACHE_RAM=0` and 200-item model recycling parameters are passed to Ollama requests.
 - `test_museum_builder.py`: Verifies anti-clobber guarantee (ensures `viewer.html` is never overwritten on data re-exports).
+- `test_video_viewer_and_server.py`: Verifies `ALL_VIDEOS` export, HTTP `206` Range streaming, `share_config.json` password loading & `403` download protection, strict `401` pre-login CSP (`default-src 'none'`), and `/__museum_logout`.
+- `test_gui_api.py`: Verifies Control Center HTTP/SSE endpoints, `/api/share/*` password & Tailscale sharing lifecycle, platform icons, and clean SSE shutdown.
 
 ### Manual Verification
 1. **Launch Setup Guide**:
